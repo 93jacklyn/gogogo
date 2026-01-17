@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>工班調度助手 (全域重排版)</title>
+    <title>安裝排程</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -45,6 +45,9 @@
         const db = firebase.firestore();
         const auth = firebase.auth();
 
+        // 🟢 關鍵修改：使用固定的「共用路徑」，讓所有裝置都讀寫同一個地方
+        const SHARED_PATH = 'company_data/shared_schedule';
+
         // --- 優化輸入框元件 ---
         const EditableInput = ({ value, onSave, className, placeholder }) => {
             const inputRef = React.useRef(null);
@@ -71,11 +74,10 @@
             const [newProject, setNewProject] = React.useState({ name: '', region: '', note: '' });
             const [isFormOpen, setIsFormOpen] = React.useState(false);
             
-            // 智慧排程狀態
             const [importText, setImportText] = React.useState('');
             const [parsedTasks, setParsedTasks] = React.useState([]);
             const [isProcessing, setIsProcessing] = React.useState(false);
-            const [replanExisting, setReplanExisting] = React.useState(false); // 新增：是否重排現有行程
+            const [replanExisting, setReplanExisting] = React.useState(false);
 
             const defaultMasters = [
                 { name: "陳師傅", skill: "水電", color: "bg-blue-100 border-blue-300 text-blue-800" },
@@ -94,16 +96,17 @@
                 const unsubscribe = auth.onAuthStateChanged(u => {
                     setUser(u);
                     if (u) {
-                        setStatusMsg("雲端已連線");
-                        const userPath = `users/${u.uid}`;
+                        setStatusMsg("🟢 已連線 (共用模式)");
                         
-                        db.collection(userPath + '/projects').orderBy('createdAt', 'desc').onSnapshot(s => 
+                        // 🟢 改用 SHARED_PATH，而不是 user.uid
+                        // 這樣不管誰登入，都看得到一樣的資料
+                        db.collection(SHARED_PATH + '/projects').orderBy('createdAt', 'desc').onSnapshot(s => 
                             setProjects(s.docs.map(d => ({id: d.id, ...d.data()}))));
-                        db.collection(userPath + '/assignments').onSnapshot(s => 
+                        db.collection(SHARED_PATH + '/assignments').onSnapshot(s => 
                             setAssignments(s.docs.map(d => ({id: d.id, ...d.data()}))));
-                        db.collection(userPath + '/masters').onSnapshot(s => {
+                        db.collection(SHARED_PATH + '/masters').onSnapshot(s => {
                             const list = s.docs.map(d => ({id: d.id, ...d.data()}));
-                            if (list.length === 0) defaultMasters.forEach(m => db.collection(userPath + '/masters').add(m));
+                            if (list.length === 0) defaultMasters.forEach(m => db.collection(SHARED_PATH + '/masters').add(m));
                             else setMasters(list.sort((a,b) => a.name.localeCompare(b.name)));
                         });
                     }
@@ -111,26 +114,26 @@
                 return () => unsubscribe();
             }, []);
 
-            // --- 基本資料庫操作 ---
+            // --- 基本資料庫操作 (路徑全部改為 SHARED_PATH) ---
             const addProject = () => {
-                if (!newProject.name || !user) return;
-                db.collection(`users/${user.uid}/projects`).add({ ...newProject, createdAt: Date.now() });
+                if (!newProject.name) return;
+                db.collection(`${SHARED_PATH}/projects`).add({ ...newProject, createdAt: Date.now() });
                 setNewProject({ name: '', region: '', note: '' });
                 setIsFormOpen(false);
             };
             const deleteProject = (id) => {
-                if (!confirm("確定要刪除嗎？")) return;
-                db.doc(`users/${user.uid}/projects/${id}`).delete();
-                assignments.filter(a => a.projectId === id).forEach(a => db.doc(`users/${user.uid}/assignments/${a.id}`).delete());
+                if (!confirm("確定要刪除嗎？這會影響所有人的畫面。")) return;
+                db.doc(`${SHARED_PATH}/projects/${id}`).delete();
+                assignments.filter(a => a.projectId === id).forEach(a => db.doc(`${SHARED_PATH}/assignments/${a.id}`).delete());
             };
-            const updateProject = (id, key, val) => db.doc(`users/${user.uid}/projects/${id}`).update({ [key]: val });
+            const updateProject = (id, key, val) => db.doc(`${SHARED_PATH}/projects/${id}`).update({ [key]: val });
             const assign = (pid, mid) => {
                 const exists = assignments.find(a => a.date === selectedDate && a.masterId === mid && a.projectId === pid);
                 if (exists) return;
-                db.collection(`users/${user.uid}/assignments`).add({ projectId: pid, masterId: mid, date: selectedDate, period: '全天' });
+                db.collection(`${SHARED_PATH}/assignments`).add({ projectId: pid, masterId: mid, date: selectedDate, period: '全天' });
             };
-            const removeAssign = (aid) => db.doc(`users/${user.uid}/assignments/${aid}`).delete();
-            const updateMaster = (id, key, val) => db.doc(`users/${user.uid}/masters/${id}`).update({ [key]: val });
+            const removeAssign = (aid) => db.doc(`${SHARED_PATH}/assignments/${aid}`).delete();
+            const updateMaster = (id, key, val) => db.doc(`${SHARED_PATH}/masters/${id}`).update({ [key]: val });
 
             const getTasks = (mid) => assignments
                 .filter(a => a.date === selectedDate && a.masterId === mid)
@@ -141,7 +144,7 @@
                     return (order[a.period] || 4) - (order[b.period] || 4);
                 });
 
-            // --- 🤖 智慧排程邏輯 (全域重排版) ---
+            // --- 智慧排程 ---
             const parseAndPreview = () => {
                 const lines = importText.split('\n').filter(l => l.trim());
                 const tasks = lines.map(line => {
@@ -160,26 +163,19 @@
                             break;
                         }
                     }
-
                     return { name, region, note: line, targetMaster, original: line, isNew: true };
                 });
                 setParsedTasks(tasks);
             };
 
             const executeAutoSchedule = async () => {
-                if (replanExisting && !confirm(`⚠️ 注意：您勾選了「重新規劃」。\n\n系統將會刪除 ${selectedDate} 之後的所有行程，並依照區域順路邏輯重新安排。\n\n確定要執行嗎？`)) {
-                    return;
-                }
+                if (replanExisting && !confirm(`⚠️ 注意：您勾選了「重新規劃」。\n\n系統將會刪除 ${selectedDate} 之後的所有行程(所有裝置都會變更)。\n\n確定要執行嗎？`)) return;
 
                 setIsProcessing(true);
-                const userPath = `users/${user.uid}`;
-                
-                // 1. 準備待排程清單 (Pool)
                 let tasksPool = [];
 
-                // A. 加入新貼上的建案 (需先建立 Project Document)
                 for (let task of parsedTasks) {
-                    const docRef = await db.collection(userPath + '/projects').add({
+                    const docRef = await db.collection(SHARED_PATH + '/projects').add({
                         name: task.name,
                         region: task.region,
                         note: task.note,
@@ -187,47 +183,34 @@
                     });
                     
                     let assignedMaster = task.targetMaster;
-                    if (!assignedMaster) {
-                        assignedMaster = masters[Math.floor(Math.random() * masters.length)];
-                    }
+                    if (!assignedMaster) assignedMaster = masters[Math.floor(Math.random() * masters.length)];
 
                     tasksPool.push({
                         projectId: docRef.id,
                         region: task.region,
                         masterId: assignedMaster.id,
-                        isFixed: false // 新建案可以自由安排
+                        isFixed: false 
                     });
                 }
 
-                // B. 如果要重排，把舊行程也抓進來 Pool
                 if (replanExisting) {
-                    // 找出所有未來行程
                     const futureAssignments = assignments.filter(a => a.date >= selectedDate);
-                    
                     for (let a of futureAssignments) {
-                        // 刪除舊的 assignment (稍後會重建)
-                        await db.doc(`${userPath}/assignments/${a.id}`).delete();
-                        
-                        // 找回專案資訊以取得區域
+                        await db.doc(`${SHARED_PATH}/assignments/${a.id}`).delete();
                         const proj = projects.find(p => p.id === a.projectId);
                         if (proj) {
                             tasksPool.push({
                                 projectId: a.projectId,
                                 region: proj.region,
-                                masterId: a.masterId, // 保持原師傅不變
+                                masterId: a.masterId,
                                 isFixed: false
                             });
                         }
                     }
                 }
 
-                // 2. 建立排程狀態表 (Master -> Date -> { count, regions: Set })
                 const masterSchedule = {};
-                
-                // 載入"保留不動"的行程 (如果是重排，就是 selectedDate 之前的；如果不重排，就是所有的)
-                const existingToKeep = replanExisting 
-                    ? assignments.filter(a => a.date < selectedDate)
-                    : assignments;
+                const existingToKeep = replanExisting ? assignments.filter(a => a.date < selectedDate) : assignments;
 
                 existingToKeep.forEach(a => {
                     if (!masterSchedule[a.masterId]) masterSchedule[a.masterId] = {};
@@ -239,18 +222,14 @@
                     if (proj && proj.region) masterSchedule[a.masterId][a.date].regions.add(proj.region);
                 });
 
-                // 3. 開始對 Pool 裡的任務進行最佳化分配
-                // 技巧：先對 Pool 依照區域排序，讓同區域的任務聚在一起處理
                 tasksPool.sort((a, b) => a.region.localeCompare(b.region));
 
                 for (let task of tasksPool) {
                     let bestDate = null;
                     let bestScore = -Infinity;
                     let assignedPeriod = '全天';
-
                     const startDate = new Date(selectedDate);
 
-                    // 搜尋未來 30 天
                     for (let i = 0; i < 30; i++) {
                         const dateObj = new Date(startDate);
                         dateObj.setDate(startDate.getDate() + i);
@@ -259,26 +238,12 @@
                         if (!masterSchedule[task.masterId]) masterSchedule[task.masterId] = {};
                         const dayState = masterSchedule[task.masterId][dateStr] || { count: 0, regions: new Set() };
 
-                        // 規則：一天最多 3 單
                         if (dayState.count >= 3) continue;
 
-                        // --- 核心演算法：順路計分 ---
                         let score = 0;
-
-                        // A. 同區域 (超級加分)
-                        if (dayState.regions.has(task.region)) {
-                            score += 2000;
-                        } 
-                        // B. 完全空閒 (次加分)
-                        else if (dayState.count === 0) {
-                            score += 500;
-                        }
-                        // C. 不同區域 (扣分)
-                        else {
-                            score -= 200; 
-                        }
-
-                        // D. 日期越近越好
+                        if (dayState.regions.has(task.region)) score += 2000;
+                        else if (dayState.count === 0) score += 500;
+                        else score -= 200; 
                         score -= i * 10;
 
                         if (score > bestScore) {
@@ -288,9 +253,7 @@
                     }
 
                     if (bestDate) {
-                        if (!masterSchedule[task.masterId][bestDate]) {
-                            masterSchedule[task.masterId][bestDate] = { count: 0, regions: new Set() };
-                        }
+                        if (!masterSchedule[task.masterId][bestDate]) masterSchedule[task.masterId][bestDate] = { count: 0, regions: new Set() };
                         const finalDayState = masterSchedule[task.masterId][bestDate];
                         
                         if (finalDayState.count === 0) assignedPeriod = '上午';
@@ -300,7 +263,7 @@
                         finalDayState.count++;
                         finalDayState.regions.add(task.region);
 
-                        await db.collection(userPath + '/assignments').add({
+                        await db.collection(SHARED_PATH + '/assignments').add({
                             projectId: task.projectId,
                             masterId: task.masterId,
                             date: bestDate,
@@ -313,7 +276,7 @@
                 setImportText('');
                 setParsedTasks([]);
                 setReplanExisting(false);
-                alert(replanExisting ? "已完成全域重排！行程已依照區域順路最佳化。" : "新增排程完成！");
+                alert("完成！所有裝置已同步更新。");
                 setView('schedule');
             };
 
@@ -429,7 +392,7 @@
                     {view === 'smart' && (
                         <div className="bg-white rounded-xl shadow border border-slate-200 p-6 min-h-[600px]">
                              <h2 className="text-2xl font-bold text-slate-800 mb-2 flex items-center gap-2">
-                                <Icons.Robot/> 智慧排程中心
+                                <Icons.Robot/> 智慧排程中心 (同步版)
                              </h2>
                              <p className="text-slate-500 mb-6">貼上建案文字，若包含師傅名字 (如: 陳師傅)，系統會自動幫該師傅尋找最近的空檔日期。</p>
                              
@@ -495,7 +458,7 @@
                                                 className="w-5 h-5 text-blue-600 rounded"
                                             />
                                             <label htmlFor="replan" className="text-sm font-bold text-slate-700 cursor-pointer">
-                                                包含現有未來行程一起重新規劃 <span className="text-xs font-normal text-red-500">(會重排 {selectedDate} 之後的行程)</span>
+                                                包含現有未來行程一起重新規劃 <span className="text-xs font-normal text-red-500">(會影響所有裝置)</span>
                                             </label>
                                         </div>
 
