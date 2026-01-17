@@ -4,62 +4,59 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>工班調度助手</title>
-    <!-- 1. 引入 Tailwind CSS (美化樣式) -->
+    
+    <!-- 1. 樣式與圖示 -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 2. 引入 React 和 Babel (讓瀏覽器看得懂程式碼) -->
+    
+    <!-- 2. 核心引擎 (React) -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    
+
+    <!-- 3. Firebase 核心 (改用相容版 SDK) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
     <style>
-        body { font-family: "Microsoft JhengHei", sans-serif; }
+        body { font-family: "Microsoft JhengHei", sans-serif; -webkit-font-smoothing: antialiased; }
+        .loading { display: flex; justify-content: center; align-items: center; height: 100vh; font-size: 1.5rem; color: #64748b; }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-900">
-    <div id="root"></div>
+    <div id="root">
+        <div class="loading">正在啟動工班系統...</div>
+    </div>
 
-    <!-- 3. 程式邏輯開始 -->
-    <script type="text/babel" data-type="module">
-        // 引入 Firebase SDK
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, collection, addDoc, deleteDoc, updateDoc, doc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-
-        // ==============================================
-        // ↓↓↓ 這是你剛剛填好的設定 (已幫你整合好) ↓↓↓
-        // ==============================================
+    <script type="text/babel">
+        // --- 這裡填入你的設定 ---
         const firebaseConfig = {
-          apiKey: "AIzaSyBN_fK1oEhocmRCdWy0pfnaLVbhmZQdxlM",
-          authDomain: "gogo-ed64b.firebaseapp.com",
-          projectId: "gogo-ed64b",
-          storageBucket: "gogo-ed64b.firebasestorage.app",
-          messagingSenderId: "121319123217",
-          appId: "1:121319123217:web:804f0adafd61cf82bc04b0"
+            apiKey: "AIzaSyBN_fK1oEhocmRCdWy0pfnaLVbhmZQdxlM",
+            authDomain: "gogo-ed64b.firebaseapp.com",
+            projectId: "gogo-ed64b",
+            storageBucket: "gogo-ed64b.firebasestorage.app",
+            messagingSenderId: "121319123217",
+            appId: "1:121319123217:web:804f0adafd61cf82bc04b0"
         };
-        // ==============================================
 
-        // 初始化 Firebase
-        let auth, db;
-        try {
-            const app = initializeApp(firebaseConfig);
-            auth = getAuth(app);
-            db = getFirestore(app);
-        } catch (e) {
-            console.error("Firebase 設定失敗，請檢查 Config 是否正確填入");
-        }
+        // 初始化 Firebase (相容模式)
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
 
         const App = () => {
-            // --- 狀態管理 ---
+            // --- 狀態 ---
             const [user, setUser] = React.useState(null);
             const [projects, setProjects] = React.useState([]);
             const [assignments, setAssignments] = React.useState([]);
             const [masters, setMasters] = React.useState([]);
+            const [statusMsg, setStatusMsg] = React.useState('連線中...');
             
+            // 介面狀態
             const [selectedDate, setSelectedDate] = React.useState(new Date().toISOString().split('T')[0]);
             const [view, setView] = React.useState('schedule');
             const [newProject, setNewProject] = React.useState({ name: '', region: '', note: '' });
             const [isFormOpen, setIsFormOpen] = React.useState(false);
-            const [statusMsg, setStatusMsg] = React.useState('連線中...');
 
             const defaultMasters = [
                 { name: "陳師傅", skill: "水電", color: "bg-blue-100 border-blue-300 text-blue-800" },
@@ -69,74 +66,107 @@
                 { name: "李師傅", skill: "雜項", color: "bg-purple-100 border-purple-300 text-purple-800" }
             ];
 
-            // 登入與監聽
+            // --- 登入與資料監聽 ---
             React.useEffect(() => {
-                if(!auth) { setStatusMsg("尚未設定 Firebase 金鑰"); return; }
-                
-                signInAnonymously(auth).catch(e => setStatusMsg("登入失敗"));
-                
-                return onAuthStateChanged(auth, (u) => {
-                    setUser(u);
-                    if(u) setStatusMsg("雲端已連線");
+                // 匿名登入
+                auth.signInAnonymously().catch(error => {
+                    console.error("登入錯誤:", error);
+                    setStatusMsg("登入失敗");
                 });
+
+                // 監聽登入狀態
+                const unsubscribeAuth = auth.onAuthStateChanged(u => {
+                    setUser(u);
+                    if (u) {
+                        setStatusMsg("雲端已連線");
+                        // 登入成功後，開始監聽資料
+                        const userPath = `users/${u.uid}`;
+                        
+                        // 1. 監聽建案
+                        db.collection(userPath + '/projects').orderBy('createdAt', 'desc')
+                          .onSnapshot(snapshot => {
+                              const list = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()}));
+                              setProjects(list);
+                          });
+
+                        // 2. 監聽派工
+                        db.collection(userPath + '/assignments')
+                          .onSnapshot(snapshot => {
+                              const list = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()}));
+                              setAssignments(list);
+                          });
+
+                        // 3. 監聽師傅
+                        db.collection(userPath + '/masters')
+                          .onSnapshot(snapshot => {
+                              const list = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()}));
+                              if (list.length === 0) {
+                                  // 初始化預設師傅
+                                  defaultMasters.forEach(m => db.collection(userPath + '/masters').add(m));
+                              } else {
+                                  setMasters(list.sort((a,b) => a.name.localeCompare(b.name)));
+                              }
+                          });
+                    }
+                });
+                return () => unsubscribeAuth();
             }, []);
 
-            // 資料庫監聽
-            React.useEffect(() => {
-                if (!user || !db) return;
-                const path = `users/${user.uid}`;
-                
-                const unsubP = onSnapshot(query(collection(db, `${path}/projects`), orderBy('createdAt', 'desc')), s => {
-                    setProjects(s.docs.map(d => ({id: d.id, ...d.data()})));
+            // --- 操作功能 ---
+            const addProject = () => {
+                if (!newProject.name || !user) return;
+                db.collection(`users/${user.uid}/projects`).add({
+                    ...newProject,
+                    createdAt: Date.now()
                 });
-                const unsubA = onSnapshot(collection(db, `${path}/assignments`), s => {
-                    setAssignments(s.docs.map(d => ({id: d.id, ...d.data()})));
-                });
-                const unsubM = onSnapshot(collection(db, `${path}/masters`), s => {
-                    const list = s.docs.map(d => ({id: d.id, ...d.data()}));
-                    if(list.length === 0) defaultMasters.forEach(m => addDoc(collection(db, `${path}/masters`), m));
-                    else setMasters(list.sort((a,b)=>a.name.localeCompare(b.name)));
-                });
-
-                return () => { unsubP(); unsubA(); unsubM(); };
-            }, [user]);
-
-            // --- 功能 ---
-            const addProject = async () => {
-                if(!newProject.name || !user) return;
-                await addDoc(collection(db, `users/${user.uid}/projects`), { ...newProject, createdAt: Date.now() });
                 setNewProject({ name: '', region: '', note: '' });
                 setIsFormOpen(false);
             };
 
-            const deleteProject = async (id) => {
-                if(!confirm("確定刪除？")) return;
-                await deleteDoc(doc(db, `users/${user.uid}/projects`, id));
-                // 簡單清理相關派工
-                assignments.filter(a => a.projectId === id).forEach(a => deleteDoc(doc(db, `users/${user.uid}/assignments`, a.id)));
+            const deleteProject = (id) => {
+                if (!confirm("確定要刪除嗎？")) return;
+                db.doc(`users/${user.uid}/projects/${id}`).delete();
+                // 刪除相關派工
+                assignments.filter(a => a.projectId === id).forEach(a => {
+                    db.doc(`users/${user.uid}/assignments/${a.id}`).delete();
+                });
             };
 
-            const assign = async (pid, mid) => {
+            const assign = (pid, mid) => {
                 const exists = assignments.find(a => a.date === selectedDate && a.masterId === mid && a.projectId === pid);
-                if(exists) return;
-                await addDoc(collection(db, `users/${user.uid}/assignments`), { projectId: pid, masterId: mid, date: selectedDate });
+                if (exists) return;
+                db.collection(`users/${user.uid}/assignments`).add({
+                    projectId: pid,
+                    masterId: mid,
+                    date: selectedDate
+                });
             };
 
-            const removeAssign = async (aid) => deleteDoc(doc(db, `users/${user.uid}/assignments`, aid));
-            
-            const updateMaster = async (id, key, val) => updateDoc(doc(db, `users/${user.uid}/masters`, id), { [key]: val });
+            const removeAssign = (aid) => {
+                db.doc(`users/${user.uid}/assignments/${aid}`).delete();
+            };
 
-            const getTasks = (mid) => assignments
-                .filter(a => a.date === selectedDate && a.masterId === mid)
-                .map(a => ({...a, project: projects.find(p => p.id === a.projectId)}))
-                .filter(t => t.project);
+            const updateMaster = (id, key, val) => {
+                db.doc(`users/${user.uid}/masters/${id}`).update({ [key]: val });
+            };
 
-            // --- 圖示 (SVG) ---
-            const IconCheck = () => <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"/></svg>;
-            const IconX = () => <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>;
-            const IconTrash = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>;
+            const getTasks = (mid) => {
+                return assignments
+                    .filter(a => a.date === selectedDate && a.masterId === mid)
+                    .map(a => {
+                        const proj = projects.find(p => p.id === a.projectId);
+                        return { ...a, project: proj };
+                    })
+                    .filter(t => t.project);
+            };
 
-            // --- 畫面 ---
+            // --- 簡單圖示 SVG ---
+            const Icons = {
+                Check: () => <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"/></svg>,
+                X: () => <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>,
+                Trash: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            };
+
             return (
                 <div className="min-h-screen pb-20 p-4 max-w-6xl mx-auto">
                     {/* Header */}
@@ -146,14 +176,14 @@
                             <span className={`text-xs px-2 py-0.5 rounded-full ${user ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>{statusMsg}</span>
                         </h1>
                         <div className="flex bg-slate-100 p-1 rounded-lg mt-4 md:mt-0">
-                            {['schedule:排程', 'projects:建案', 'settings:師傅'].map(v => {
+                            {['schedule:每日排程', 'projects:建案管理', 'settings:師傅設定'].map(v => {
                                 const [key, label] = v.split(':');
                                 return <button key={key} onClick={()=>setView(key)} className={`px-4 py-2 rounded-md transition-all ${view===key ? 'bg-white shadow text-slate-900 font-bold' : 'text-slate-500 hover:text-slate-900'}`}>{label}</button>
                             })}
                         </div>
                     </header>
 
-                    {/* 排程頁面 */}
+                    {/* 頁面內容切換 */}
                     {view === 'schedule' && (
                         <div className="space-y-6">
                             <div className="bg-white p-4 rounded-xl shadow border border-slate-200 flex items-center gap-4">
@@ -162,11 +192,5 @@
                             </div>
 
                             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                                {/* 建案池 */}
-                                <div className="lg:col-span-1 bg-white rounded-xl shadow border border-slate-200 h-[600px] flex flex-col">
-                                    <div className="p-4 border-b bg-slate-50 rounded-t-xl font-bold text-slate-700">📋 待派工建案</div>
-                                    <div className="overflow-y-auto p-3 space-y-3 flex-1">
-                                        {projects.map(p => (
-                                            <div key={p.id} className="border rounded-lg p-3 hover:shadow-md transition-all bg-white group">
-                                                <div className="flex justify-between font-bold text-slate-800 mb-1">
-                                                    {p.name} <span className="text-xs bg-slate-100 px-2 py-
+                                {/* 左側：建案池 */}
+                                <div className="lg:col-span-1 bg-white rounded-xl shadow border border-slate-20
