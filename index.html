@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工班調度助手</title>
+    <!-- 1. 引入 Tailwind CSS (美化樣式) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 2. 引入 React 和 Babel (讓瀏覽器看得懂程式碼) -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        body { font-family: "Microsoft JhengHei", sans-serif; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+    <div id="root"></div>
+
+    <!-- 3. 程式邏輯開始 -->
+    <script type="text/babel" data-type="module">
+        // 引入 Firebase SDK
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, collection, addDoc, deleteDoc, updateDoc, doc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // ==============================================
+        // ↓↓↓ 請在下方大括號內貼上你的 Firebase Config ↓↓↓
+        // ==============================================
+        const firebaseConfig = {
+  apiKey: "AIzaSyBN_fK1oEhocmRCdWy0pfnaLVbhmZQdxlM",
+  authDomain: "gogo-ed64b.firebaseapp.com",
+  projectId: "gogo-ed64b",
+  storageBucket: "gogo-ed64b.firebasestorage.app",
+  messagingSenderId: "121319123217",
+  appId: "1:121319123217:web:804f0adafd61cf82bc04b0"
+};
+        // ==============================================
+
+        // 初始化 Firebase
+        let auth, db;
+        try {
+            const app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+        } catch (e) {
+            console.error("Firebase 設定失敗，請檢查 Config 是否正確填入");
+        }
+
+        const App = () => {
+            // --- 狀態管理 ---
+            const [user, setUser] = React.useState(null);
+            const [projects, setProjects] = React.useState([]);
+            const [assignments, setAssignments] = React.useState([]);
+            const [masters, setMasters] = React.useState([]);
+            
+            const [selectedDate, setSelectedDate] = React.useState(new Date().toISOString().split('T')[0]);
+            const [view, setView] = React.useState('schedule');
+            const [newProject, setNewProject] = React.useState({ name: '', region: '', note: '' });
+            const [isFormOpen, setIsFormOpen] = React.useState(false);
+            const [statusMsg, setStatusMsg] = React.useState('連線中...');
+
+            const defaultMasters = [
+                { name: "陳師傅", skill: "水電", color: "bg-blue-100 border-blue-300 text-blue-800" },
+                { name: "林師傅", skill: "木工", color: "bg-amber-100 border-amber-300 text-amber-800" },
+                { name: "張師傅", skill: "泥作", color: "bg-stone-100 border-stone-300 text-stone-800" },
+                { name: "王師傅", skill: "油漆", color: "bg-emerald-100 border-emerald-300 text-emerald-800" },
+                { name: "李師傅", skill: "雜項", color: "bg-purple-100 border-purple-300 text-purple-800" }
+            ];
+
+            // 登入與監聽
+            React.useEffect(() => {
+                if(!auth) { setStatusMsg("尚未設定 Firebase 金鑰"); return; }
+                
+                signInAnonymously(auth).catch(e => setStatusMsg("登入失敗"));
+                
+                return onAuthStateChanged(auth, (u) => {
+                    setUser(u);
+                    if(u) setStatusMsg("雲端已連線");
+                });
+            }, []);
+
+            // 資料庫監聽
+            React.useEffect(() => {
+                if (!user || !db) return;
+                const path = `users/${user.uid}`;
+                
+                const unsubP = onSnapshot(query(collection(db, `${path}/projects`), orderBy('createdAt', 'desc')), s => {
+                    setProjects(s.docs.map(d => ({id: d.id, ...d.data()})));
+                });
+                const unsubA = onSnapshot(collection(db, `${path}/assignments`), s => {
+                    setAssignments(s.docs.map(d => ({id: d.id, ...d.data()})));
+                });
+                const unsubM = onSnapshot(collection(db, `${path}/masters`), s => {
+                    const list = s.docs.map(d => ({id: d.id, ...d.data()}));
+                    if(list.length === 0) defaultMasters.forEach(m => addDoc(collection(db, `${path}/masters`), m));
+                    else setMasters(list.sort((a,b)=>a.name.localeCompare(b.name)));
+                });
+
+                return () => { unsubP(); unsubA(); unsubM(); };
+            }, [user]);
+
+            // --- 功能 ---
+            const addProject = async () => {
+                if(!newProject.name || !user) return;
+                await addDoc(collection(db, `users/${user.uid}/projects`), { ...newProject, createdAt: Date.now() });
+                setNewProject({ name: '', region: '', note: '' });
+                setIsFormOpen(false);
+            };
+
+            const deleteProject = async (id) => {
+                if(!confirm("確定刪除？")) return;
+                await deleteDoc(doc(db, `users/${user.uid}/projects`, id));
+                // 簡單清理相關派工
+                assignments.filter(a => a.projectId === id).forEach(a => deleteDoc(doc(db, `users/${user.uid}/assignments`, a.id)));
+            };
+
+            const assign = async (pid, mid) => {
+                const exists = assignments.find(a => a.date === selectedDate && a.masterId === mid && a.projectId === pid);
+                if(exists) return;
+                await addDoc(collection(db, `users/${user.uid}/assignments`), { projectId: pid, masterId: mid, date: selectedDate });
+            };
+
+            const removeAssign = async (aid) => deleteDoc(doc(db, `users/${user.uid}/assignments`, aid));
+            
+            const updateMaster = async (id, key, val) => updateDoc(doc(db, `users/${user.uid}/masters`, id), { [key]: val });
+
+            const getTasks = (mid) => assignments
+                .filter(a => a.date === selectedDate && a.masterId === mid)
+                .map(a => ({...a, project: projects.find(p => p.id === a.projectId)}))
+                .filter(t => t.project);
+
+            // --- 圖示 (SVG) ---
+            const IconCheck = () => <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"/></svg>;
+            const IconX = () => <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>;
+            const IconTrash = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>;
+
+            // --- 畫面 ---
+            return (
+                <div className="min-h-screen pb-20 p-4 max-w-6xl mx-auto">
+                    {/* Header */}
+                    <header className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-xl shadow mb-6 border border-slate-200">
+                        <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                            🏗️ 工班調度助手 
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${user ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>{statusMsg}</span>
+                        </h1>
+                        <div className="flex bg-slate-100 p-1 rounded-lg mt-4 md:mt-0">
+                            {['schedule:排程', 'projects:建案', 'settings:師傅'].map(v => {
+                                const [key, label] = v.split(':');
+                                return <button key={key} onClick={()=>setView(key)} className={`px-4 py-2 rounded-md transition-all ${view===key ? 'bg-white shadow text-slate-900 font-bold' : 'text-slate-500 hover:text-slate-900'}`}>{label}</button>
+                            })}
+                        </div>
+                    </header>
+
+                    {/* 排程頁面 */}
+                    {view === 'schedule' && (
+                        <div className="space-y-6">
+                            <div className="bg-white p-4 rounded-xl shadow border border-slate-200 flex items-center gap-4">
+                                <span className="font-bold text-slate-700">📅 施工日期：</span>
+                                <input type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} className="bg-slate-50 border p-2 rounded-lg font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"/>
+                            </div>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                {/* 建案池 */}
+                                <div className="lg:col-span-1 bg-white rounded-xl shadow border border-slate-200 h-[600px] flex flex-col">
+                                    <div className="p-4 border-b bg-slate-50 rounded-t-xl font-bold text-slate-700">📋 待派工建案</div>
+                                    <div className="overflow-y-auto p-3 space-y-3 flex-1">
+                                        {projects.map(p => (
+                                            <div key={p.id} className="border rounded-lg p-3 hover:shadow-md transition-all bg-white group">
+                                                <div className="flex justify-between font-bold text-slate-800 mb-1">
+                                                    {p.name} <span className="text-xs bg-slate-100 px-2 py-1 rounded text-slate-500 border">{p.region}</span>
+                                                </div>
+                                                <di
