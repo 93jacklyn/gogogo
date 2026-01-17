@@ -3,17 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>工班調度助手</title>
+    <title>工班調度助手 (指定派工版)</title>
     
-    <!-- 1. 樣式與圖示 -->
     <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- 2. 核心引擎 (React) -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- 3. Firebase 核心 (改用相容版 SDK，保證穩定) -->
+    <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
@@ -21,6 +18,10 @@
     <style>
         body { font-family: "Microsoft JhengHei", sans-serif; -webkit-font-smoothing: antialiased; }
         .loading { display: flex; justify-content: center; align-items: center; height: 100vh; font-size: 1.5rem; color: #64748b; }
+        input:focus, textarea:focus { outline: 2px solid #3b82f6; border-radius: 4px; }
+        /* 卡片過場動畫 */
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        .card-anim { animation: fadeIn 0.3s ease-out; }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-900">
@@ -39,28 +40,43 @@
             appId: "1:121319123217:web:804f0adafd61cf82bc04b0"
         };
 
-        // 初始化 Firebase
         if (!firebase.apps.length) {
             firebase.initializeApp(firebaseConfig);
         }
         const db = firebase.firestore();
         const auth = firebase.auth();
 
+        // --- 優化輸入框元件 ---
+        const EditableInput = ({ value, onSave, className, placeholder }) => {
+            const inputRef = React.useRef(null);
+            React.useEffect(() => {
+                if (inputRef.current && inputRef.current.value !== (value || '')) {
+                    inputRef.current.value = value || '';
+                }
+            }, [value]);
+            const handleBlur = (e) => {
+                if (e.target.value !== (value || '')) onSave(e.target.value);
+            };
+            return <input ref={inputRef} className={className} defaultValue={value || ''} onBlur={handleBlur} placeholder={placeholder} />;
+        };
+
         const App = () => {
-            // --- 狀態變數 ---
             const [user, setUser] = React.useState(null);
             const [projects, setProjects] = React.useState([]);
             const [assignments, setAssignments] = React.useState([]);
             const [masters, setMasters] = React.useState([]);
             const [statusMsg, setStatusMsg] = React.useState('連線中...');
             
-            // 介面控制
             const [selectedDate, setSelectedDate] = React.useState(new Date().toISOString().split('T')[0]);
             const [view, setView] = React.useState('schedule');
             const [newProject, setNewProject] = React.useState({ name: '', region: '', note: '' });
             const [isFormOpen, setIsFormOpen] = React.useState(false);
+            
+            // 智慧排程狀態
+            const [importText, setImportText] = React.useState('');
+            const [parsedTasks, setParsedTasks] = React.useState([]);
+            const [isProcessing, setIsProcessing] = React.useState(false);
 
-            // 預設師傅資料
             const defaultMasters = [
                 { name: "陳師傅", skill: "水電", color: "bg-blue-100 border-blue-300 text-blue-800" },
                 { name: "林師傅", skill: "木工", color: "bg-amber-100 border-amber-300 text-amber-800" },
@@ -69,11 +85,10 @@
                 { name: "李師傅", skill: "雜項", color: "bg-purple-100 border-purple-300 text-purple-800" }
             ];
 
-            // --- 1. 登入與連線 ---
             React.useEffect(() => {
                 auth.signInAnonymously().catch(error => {
                     console.error("登入錯誤:", error);
-                    setStatusMsg("登入失敗，請檢查網路");
+                    setStatusMsg("登入失敗");
                 });
 
                 const unsubscribe = auth.onAuthStateChanged(u => {
@@ -82,134 +97,213 @@
                         setStatusMsg("雲端已連線");
                         const userPath = `users/${u.uid}`;
                         
-                        // 監聽建案
-                        db.collection(userPath + '/projects').orderBy('createdAt', 'desc')
-                          .onSnapshot(snapshot => {
-                              const list = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()}));
-                              setProjects(list);
-                          });
-
-                        // 監聽派工
-                        db.collection(userPath + '/assignments')
-                          .onSnapshot(snapshot => {
-                              const list = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()}));
-                              setAssignments(list);
-                          });
-
-                        // 監聽師傅
-                        db.collection(userPath + '/masters')
-                          .onSnapshot(snapshot => {
-                              const list = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()}));
-                              if (list.length === 0) {
-                                  defaultMasters.forEach(m => db.collection(userPath + '/masters').add(m));
-                              } else {
-                                  setMasters(list.sort((a,b) => a.name.localeCompare(b.name)));
-                              }
-                          });
+                        db.collection(userPath + '/projects').orderBy('createdAt', 'desc').onSnapshot(s => 
+                            setProjects(s.docs.map(d => ({id: d.id, ...d.data()}))));
+                        db.collection(userPath + '/assignments').onSnapshot(s => 
+                            setAssignments(s.docs.map(d => ({id: d.id, ...d.data()}))));
+                        db.collection(userPath + '/masters').onSnapshot(s => {
+                            const list = s.docs.map(d => ({id: d.id, ...d.data()}));
+                            if (list.length === 0) defaultMasters.forEach(m => db.collection(userPath + '/masters').add(m));
+                            else setMasters(list.sort((a,b) => a.name.localeCompare(b.name)));
+                        });
                     }
                 });
                 return () => unsubscribe();
             }, []);
 
-            // --- 2. 資料操作功能 ---
+            // --- 基本資料庫操作 ---
             const addProject = () => {
                 if (!newProject.name || !user) return;
-                db.collection(`users/${user.uid}/projects`).add({
-                    ...newProject,
-                    createdAt: Date.now()
-                });
+                db.collection(`users/${user.uid}/projects`).add({ ...newProject, createdAt: Date.now() });
                 setNewProject({ name: '', region: '', note: '' });
                 setIsFormOpen(false);
             };
-
             const deleteProject = (id) => {
                 if (!confirm("確定要刪除嗎？")) return;
                 db.doc(`users/${user.uid}/projects/${id}`).delete();
-                assignments.filter(a => a.projectId === id).forEach(a => {
-                    db.doc(`users/${user.uid}/assignments/${a.id}`).delete();
-                });
+                assignments.filter(a => a.projectId === id).forEach(a => db.doc(`users/${user.uid}/assignments/${a.id}`).delete());
             };
-
+            const updateProject = (id, key, val) => db.doc(`users/${user.uid}/projects/${id}`).update({ [key]: val });
             const assign = (pid, mid) => {
                 const exists = assignments.find(a => a.date === selectedDate && a.masterId === mid && a.projectId === pid);
                 if (exists) return;
-                db.collection(`users/${user.uid}/assignments`).add({
-                    projectId: pid,
-                    masterId: mid,
-                    date: selectedDate
+                db.collection(`users/${user.uid}/assignments`).add({ projectId: pid, masterId: mid, date: selectedDate, period: '全天' });
+            };
+            const removeAssign = (aid) => db.doc(`users/${user.uid}/assignments/${aid}`).delete();
+            const updateMaster = (id, key, val) => db.doc(`users/${user.uid}/masters/${id}`).update({ [key]: val });
+
+            const getTasks = (mid) => assignments
+                .filter(a => a.date === selectedDate && a.masterId === mid)
+                .map(a => ({ ...a, project: projects.find(p => p.id === a.projectId) }))
+                .filter(t => t.project)
+                .sort((a, b) => {
+                    const order = { '上午': 1, '下午': 2, '全天': 0 };
+                    return (order[a.period] || 3) - (order[b.period] || 3);
                 });
+
+            // --- 🤖 智慧排程邏輯 (新版) ---
+            const parseAndPreview = () => {
+                const lines = importText.split('\n').filter(l => l.trim());
+                const tasks = lines.map(line => {
+                    // 解析邏輯：名稱、區域、備註、指定師傅
+                    const parts = line.split(/[,，\s]+/).filter(p => p);
+                    const name = parts[0] || '未命名建案';
+                    let region = '未分類';
+                    let targetMaster = null;
+
+                    // 1. 抓區域
+                    const districtMatch = line.match(/(\w+[市縣])?(\w+[區鄉鎮市])/);
+                    if (districtMatch) region = districtMatch[2];
+                    else if (parts[1] && parts[1].length < 5) region = parts[1]; // 假設第二個詞短的是區域
+
+                    // 2. 抓指定師傅 (關鍵功能)
+                    for (let m of masters) {
+                        // 如果文字裡包含師傅名字 (例如 "陳師傅" 或 "陳")
+                        if (line.includes(m.name)) {
+                            targetMaster = m;
+                            break;
+                        }
+                    }
+
+                    return { name, region, note: line, targetMaster, original: line };
+                });
+                setParsedTasks(tasks);
             };
 
-            const removeAssign = (aid) => {
-                db.doc(`users/${user.uid}/assignments/${aid}`).delete();
+            const executeAutoSchedule = async () => {
+                setIsProcessing(true);
+                const userPath = `users/${user.uid}`;
+                
+                // 1. 建立目前的工作負載表 (Master -> Date -> Count)
+                // 這樣我們才知道哪個師傅哪天已經滿了，不會重複塞
+                const workload = {};
+                assignments.forEach(a => {
+                    if (!workload[a.masterId]) workload[a.masterId] = {};
+                    if (!workload[a.masterId][a.date]) workload[a.masterId][a.date] = 0;
+                    workload[a.masterId][a.date]++;
+                });
+
+                // 2. 開始安排
+                for (let task of parsedTasks) {
+                    // 先加入建案資料庫
+                    const docRef = await db.collection(userPath + '/projects').add({
+                        name: task.name,
+                        region: task.region,
+                        note: task.note,
+                        createdAt: Date.now()
+                    });
+
+                    // 決定要派給誰
+                    let assignedMaster = task.targetMaster;
+                    
+                    // 如果沒指定，就找一個隨機的或輪流 (這裡簡化為隨機，重點在處理"有指定"的)
+                    if (!assignedMaster) {
+                        assignedMaster = masters[Math.floor(Math.random() * masters.length)];
+                    }
+
+                    // 3. 幫這位師傅找最近的空檔
+                    let searchDate = new Date(selectedDate); // 從畫面上選的日期開始找
+                    let foundDateStr = '';
+                    let assignedPeriod = '全天';
+
+                    // 最多往後找 30 天，避免無限迴圈
+                    for (let i = 0; i < 30; i++) {
+                        const dateStr = searchDate.toISOString().split('T')[0];
+                        const currentLoad = (workload[assignedMaster.id] && workload[assignedMaster.id][dateStr]) || 0;
+
+                        // 假設一天最多接 2 單 (上午+下午)
+                        if (currentLoad < 2) {
+                            foundDateStr = dateStr;
+                            // 簡單判斷時段：如果已經有 1 單，那這單就是下午；如果是 0 單，就是上午
+                            assignedPeriod = currentLoad === 0 ? '上午' : '下午';
+                            
+                            // 更新負載表，以免下一筆任務又塞進來
+                            if (!workload[assignedMaster.id]) workload[assignedMaster.id] = {};
+                            if (!workload[assignedMaster.id][dateStr]) workload[assignedMaster.id][dateStr] = 0;
+                            workload[assignedMaster.id][dateStr]++;
+                            
+                            break;
+                        }
+                        // 今天滿了，找明天
+                        searchDate.setDate(searchDate.getDate() + 1);
+                    }
+
+                    if (foundDateStr) {
+                        await db.collection(userPath + '/assignments').add({
+                            projectId: docRef.id,
+                            masterId: assignedMaster.id,
+                            date: foundDateStr,
+                            period: assignedPeriod
+                        });
+                    }
+                }
+
+                setIsProcessing(false);
+                setImportText('');
+                setParsedTasks([]);
+                alert("排程完成！已依照您指定的師傅尋找最近空檔。");
+                setView('schedule');
             };
 
-            const updateMaster = (id, key, val) => {
-                db.doc(`users/${user.uid}/masters/${id}`).update({ [key]: val });
-            };
-
-            const getTasks = (mid) => {
-                return assignments
-                    .filter(a => a.date === selectedDate && a.masterId === mid)
-                    .map(a => {
-                        const proj = projects.find(p => p.id === a.projectId);
-                        return { ...a, project: proj };
-                    })
-                    .filter(t => t.project);
-            };
-
-            // --- 3. 圖示元件 ---
             const Icons = {
                 Check: () => <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"/></svg>,
                 X: () => <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>,
-                Trash: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                Trash: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>,
+                Robot: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.384-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
             };
 
-            // --- 4. 畫面渲染 ---
             return (
                 <div className="min-h-screen pb-20 p-4 max-w-6xl mx-auto">
-                    {/* 頁首 */}
                     <header className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-xl shadow mb-6 border border-slate-200">
                         <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
                             🏗️ 工班調度助手 
                             <span className={`text-xs px-2 py-0.5 rounded-full ${user ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>{statusMsg}</span>
                         </h1>
-                        <div className="flex bg-slate-100 p-1 rounded-lg mt-4 md:mt-0">
+                        <div className="flex bg-slate-100 p-1 rounded-lg mt-4 md:mt-0 overflow-x-auto">
                             {['schedule:排程', 'projects:建案', 'settings:師傅'].map(v => {
                                 const [key, label] = v.split(':');
-                                return <button key={key} onClick={()=>setView(key)} className={`px-4 py-2 rounded-md transition-all ${view===key ? 'bg-white shadow text-slate-900 font-bold' : 'text-slate-500 hover:text-slate-900'}`}>{label}</button>
+                                return <button key={key} onClick={()=>setView(key)} className={`px-4 py-2 rounded-md whitespace-nowrap transition-all ${view===key ? 'bg-white shadow text-slate-900 font-bold' : 'text-slate-500 hover:text-slate-900'}`}>{label}</button>
                             })}
+                            <button onClick={()=>setView('smart')} className={`px-4 py-2 rounded-md whitespace-nowrap transition-all flex items-center gap-1 ${view==='smart' ? 'bg-blue-600 shadow text-white font-bold' : 'text-blue-600 hover:bg-blue-50'}`}>
+                                <Icons.Robot/> 智慧排程
+                            </button>
                         </div>
                     </header>
 
-                    {/* 頁面：每日排程 */}
                     {view === 'schedule' && (
                         <div className="space-y-6">
                             <div className="bg-white p-4 rounded-xl shadow border border-slate-200 flex items-center gap-4">
                                 <span className="font-bold text-slate-700">📅 施工日期：</span>
                                 <input type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} className="bg-slate-50 border p-2 rounded-lg font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"/>
+                                <span className="text-sm text-slate-400 hidden md:inline">← 切換日期查看行程</span>
                             </div>
 
                             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                                {/* 建案列表 */}
+                                {/* 建案池 */}
                                 <div className="lg:col-span-1 bg-white rounded-xl shadow border border-slate-200 h-[600px] flex flex-col">
-                                    <div className="p-4 border-b bg-slate-50 rounded-t-xl font-bold text-slate-700">📋 待派工建案</div>
+                                    <div className="p-4 border-b bg-slate-50 rounded-t-xl font-bold text-slate-700 flex justify-between">
+                                        <span>📋 待派工建案</span>
+                                        <button onClick={()=>setView('projects')} className="text-blue-500 text-xs hover:underline">管理</button>
+                                    </div>
                                     <div className="overflow-y-auto p-3 space-y-3 flex-1">
-                                        {projects.length === 0 && <div className="text-center text-slate-400 py-10">尚無建案，請到「建案」分頁新增</div>}
                                         {projects.map(p => (
-                                            <div key={p.id} className="border rounded-lg p-3 hover:shadow-md transition-all bg-white">
-                                                <div className="flex justify-between font-bold text-slate-800 mb-1">
-                                                    {p.name} <span className="text-xs bg-slate-100 px-2 py-1 rounded text-slate-500 border">{p.region}</span>
+                                            <div key={p.id} className="border rounded-lg p-3 hover:shadow-md transition-all bg-white card-anim">
+                                                <div className="flex justify-between font-bold text-slate-800 mb-1 gap-2">
+                                                    <div className="flex-1">
+                                                        <EditableInput className="w-full bg-transparent font-bold text-slate-800 focus:bg-white px-1" value={p.name} onSave={(val)=>updateProject(p.id, 'name', val)} />
+                                                    </div>
+                                                    <div className="w-20">
+                                                         <EditableInput className="w-full bg-slate-100 px-2 py-0.5 rounded text-xs text-slate-500 border border-slate-200 text-center" value={p.region} onSave={(val)=>updateProject(p.id, 'region', val)}/>
+                                                    </div>
                                                 </div>
-                                                <div className="text-sm text-slate-500 mb-3">{p.note || '無備註'}</div>
+                                                <div className="text-sm text-slate-500 mb-3">
+                                                    <EditableInput className="w-full bg-transparent text-slate-500 px-1 focus:bg-white" value={p.note} onSave={(val)=>updateProject(p.id, 'note', val)} placeholder="備註..." />
+                                                </div>
                                                 <div className="flex gap-1 border-t pt-2">
                                                     {masters.map(m => {
                                                         const isAssigned = assignments.some(a => a.projectId===p.id && a.masterId===m.id && a.date===selectedDate);
                                                         return (
-                                                            <button key={m.id} onClick={()=>assign(p.id, m.id)} disabled={isAssigned} 
-                                                                className={`flex-1 py-1 rounded text-xs font-bold transition-colors ${isAssigned ? 'bg-green-500 text-white cursor-default' : 'bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-600'}`}>
-                                                                {isAssigned ? <Icons.Check/> : m.name[0]}
-                                                            </button>
+                                                            <button key={m.id} onClick={()=>assign(p.id, m.id)} disabled={isAssigned} className={`flex-1 py-1 rounded text-xs font-bold transition-colors ${isAssigned ? 'bg-green-500 text-white cursor-default' : 'bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-600'}`}>{isAssigned ? <Icons.Check/> : m.name[0]}</button>
                                                         )
                                                     })}
                                                 </div>
@@ -218,7 +312,7 @@
                                     </div>
                                 </div>
 
-                                {/* 師傅行程表 */}
+                                {/* 師傅行程 */}
                                 <div className="lg:col-span-2 overflow-x-auto pb-4">
                                     <div className="flex gap-4 min-w-[700px]">
                                         {masters.map(m => {
@@ -233,14 +327,15 @@
                                                         </div>
                                                     </div>
                                                     <div className="p-2 space-y-2 overflow-y-auto flex-1 bg-slate-50">
-                                                        {tasks.length === 0 && <div className="text-center text-slate-300 text-xs py-4">本日無行程</div>}
+                                                        {tasks.length === 0 && <div className="text-center text-slate-300 text-xs py-10">尚無行程</div>}
                                                         {tasks.map(t => (
-                                                            <div key={t.id} className="bg-white p-2 rounded border shadow-sm relative group">
-                                                                <div className="flex justify-between text-xs text-slate-400 mb-1">
-                                                                    <span>{t.project.region}</span>
+                                                            <div key={t.id} className="bg-white p-2 rounded border shadow-sm relative group mb-2 card-anim">
+                                                                <div className="flex justify-between text-xs text-slate-400 mb-1 border-b border-slate-100 pb-1">
+                                                                    <span className={`px-1.5 rounded ${t.period === '上午' ? 'bg-orange-100 text-orange-600' : t.period === '下午' ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-100'}`}>{t.period || '全天'}</span>
                                                                     <button onClick={()=>removeAssign(t.id)} className="text-red-400 hover:text-red-600"><Icons.X/></button>
                                                                 </div>
-                                                                <div className="font-bold text-slate-800 text-sm">{t.project.name}</div>
+                                                                <div className="font-bold text-slate-800 text-sm mt-1">{t.project.name}</div>
+                                                                <div className="text-xs text-slate-500">{t.project.region}</div>
                                                             </div>
                                                         ))}
                                                     </div>
@@ -253,7 +348,79 @@
                         </div>
                     )}
 
-                    {/* 頁面：建案管理 */}
+                    {view === 'smart' && (
+                        <div className="bg-white rounded-xl shadow border border-slate-200 p-6 min-h-[600px]">
+                             <h2 className="text-2xl font-bold text-slate-800 mb-2 flex items-center gap-2">
+                                <Icons.Robot/> 智慧排程中心 (指定派工)
+                             </h2>
+                             <p className="text-slate-500 mb-6">貼上建案文字，若包含師傅名字 (如: 陳師傅)，系統會自動幫該師傅尋找最近的空檔日期。</p>
+                             
+                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                <div>
+                                    <label className="block font-bold text-slate-700 mb-2">1. 貼上建案 (可插單)</label>
+                                    <div className="text-xs text-slate-400 mb-2 bg-slate-100 p-2 rounded">
+                                        格式範例：<br/>
+                                        1. 帝寶豪宅, 陳師傅 (自動排給陳師傅，找最近空檔)<br/>
+                                        2. 板橋車站修繕 (未指定，系統隨機分配)<br/>
+                                        3. 信義區 A13, 林師傅, 急件 (自動排給林師傅)
+                                    </div>
+                                    <textarea 
+                                        className="w-full h-64 p-4 border border-slate-300 rounded-lg bg-slate-50 font-mono text-sm focus:ring-2 focus:ring-blue-500"
+                                        placeholder="在此貼上資料..."
+                                        value={importText}
+                                        onChange={e => setImportText(e.target.value)}
+                                    ></textarea>
+                                    <button 
+                                        onClick={parseAndPreview}
+                                        className="mt-4 bg-slate-800 text-white px-6 py-2 rounded-lg font-bold hover:bg-slate-700 w-full"
+                                    >
+                                        分析資料
+                                    </button>
+                                </div>
+
+                                <div>
+                                    <label className="block font-bold text-slate-700 mb-2">2. 預覽與執行</label>
+                                    <div className="bg-slate-50 rounded-lg border border-slate-200 h-64 overflow-y-auto p-4 mb-4">
+                                        {parsedTasks.length === 0 ? (
+                                            <div className="text-slate-400 text-center py-10">等待分析...</div>
+                                        ) : (
+                                            <ul className="space-y-2">
+                                                {parsedTasks.map((task, idx) => (
+                                                    <li key={idx} className="flex justify-between items-center text-sm border-b pb-1">
+                                                        <span className="font-bold text-slate-700">{task.name}</span>
+                                                        <div className="flex gap-1">
+                                                            <span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded text-xs">{task.region}</span>
+                                                            {task.targetMaster ? (
+                                                                <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-bold">➡️ {task.targetMaster.name}</span>
+                                                            ) : (
+                                                                <span className="bg-gray-200 text-gray-500 px-2 py-0.5 rounded text-xs">隨機分配</span>
+                                                            )}
+                                                        </div>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
+                                    
+                                    <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
+                                        <div className="mb-4">
+                                            <label className="block text-sm font-bold text-blue-800 mb-1">開始尋找空檔的起始日期</label>
+                                            <input type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} className="w-full p-2 border rounded"/>
+                                        </div>
+                                        <button 
+                                            onClick={executeAutoSchedule}
+                                            disabled={parsedTasks.length === 0 || isProcessing}
+                                            className={`w-full py-3 rounded-lg font-bold text-white shadow-lg transition-all ${parsedTasks.length === 0 ? 'bg-slate-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 hover:scale-[1.02]'}`}
+                                        >
+                                            {isProcessing ? '正在計算與寫入...' : '🚀 執行自動排程 (含插單)'}
+                                        </button>
+                                        <p className="text-xs text-blue-400 mt-2 text-center">系統會自動避開師傅已滿的時段</p>
+                                    </div>
+                                </div>
+                             </div>
+                        </div>
+                    )}
+
                     {view === 'projects' && (
                         <div className="bg-white rounded-xl shadow border border-slate-200 min-h-[500px]">
                             <div className="p-6 border-b flex justify-between items-center">
@@ -281,9 +448,9 @@
                                     <tbody>
                                         {projects.map(p => (
                                             <tr key={p.id} className="border-b hover:bg-slate-50">
-                                                <td className="p-3"><span className="border bg-white px-2 py-1 rounded text-xs">{p.region}</span></td>
-                                                <td className="p-3 font-bold text-slate-800">{p.name}</td>
-                                                <td className="p-3 text-slate-500">{p.note}</td>
+                                                <td className="p-3 w-32"><EditableInput className="w-full border bg-white px-2 py-1 rounded text-xs text-center" value={p.region} onSave={(val)=>updateProject(p.id, 'region', val)}/></td>
+                                                <td className="p-3 font-bold text-slate-800"><EditableInput className="w-full bg-transparent focus:bg-white p-1" value={p.name} onSave={(val)=>updateProject(p.id, 'name', val)}/></td>
+                                                <td className="p-3 text-slate-500"><EditableInput className="w-full bg-transparent focus:bg-white p-1" value={p.note} onSave={(val)=>updateProject(p.id, 'note', val)}/></td>
                                                 <td className="p-3 text-right"><button onClick={()=>deleteProject(p.id)} className="text-red-400 hover:text-red-600 p-2"><Icons.Trash/></button></td>
                                             </tr>
                                         ))}
@@ -293,7 +460,6 @@
                         </div>
                     )}
 
-                    {/* 頁面：師傅設定 */}
                     {view === 'settings' && (
                         <div className="max-w-2xl mx-auto bg-white rounded-xl shadow border border-slate-200 p-6">
                             <h2 className="text-xl font-bold mb-6">👷 師傅資料設定</h2>
@@ -302,8 +468,22 @@
                                     <div key={m.id} className="flex gap-4 items-center p-4 bg-slate-50 rounded border">
                                         <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${m.color.split(' ')[0]} ${m.color.split(' ')[2]}`}>{m.name[0]}</div>
                                         <div className="flex-1 grid grid-cols-2 gap-4">
-                                            <div><label className="text-xs text-slate-500">姓名</label><input className="w-full p-2 border rounded" value={m.name} onChange={e=>updateMaster(m.id, 'name', e.target.value)}/></div>
-                                            <div><label className="text-xs text-slate-500">專長</label><input className="w-full p-2 border rounded" value={m.skill} onChange={e=>updateMaster(m.id, 'skill', e.target.value)}/></div>
+                                            <div>
+                                                <label className="text-xs text-slate-500">姓名</label>
+                                                <EditableInput 
+                                                    className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500" 
+                                                    value={m.name} 
+                                                    onSave={(val)=>updateMaster(m.id, 'name', val)}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-slate-500">專長</label>
+                                                <EditableInput 
+                                                    className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500" 
+                                                    value={m.skill} 
+                                                    onSave={(val)=>updateMaster(m.id, 'skill', val)}
+                                                />
+                                            </div>
                                         </div>
                                     </div>
                                 ))}
