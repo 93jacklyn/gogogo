@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>工班調度助手 (指定派工版)</title>
+    <title>工班調度助手 (全域重排版)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -19,7 +19,6 @@
         body { font-family: "Microsoft JhengHei", sans-serif; -webkit-font-smoothing: antialiased; }
         .loading { display: flex; justify-content: center; align-items: center; height: 100vh; font-size: 1.5rem; color: #64748b; }
         input:focus, textarea:focus { outline: 2px solid #3b82f6; border-radius: 4px; }
-        /* 卡片過場動畫 */
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         .card-anim { animation: fadeIn 0.3s ease-out; }
     </style>
@@ -76,6 +75,7 @@
             const [importText, setImportText] = React.useState('');
             const [parsedTasks, setParsedTasks] = React.useState([]);
             const [isProcessing, setIsProcessing] = React.useState(false);
+            const [replanExisting, setReplanExisting] = React.useState(false); // 新增：是否重排現有行程
 
             const defaultMasters = [
                 { name: "陳師傅", skill: "水電", color: "bg-blue-100 border-blue-300 text-blue-800" },
@@ -137,102 +137,173 @@
                 .map(a => ({ ...a, project: projects.find(p => p.id === a.projectId) }))
                 .filter(t => t.project)
                 .sort((a, b) => {
-                    const order = { '上午': 1, '下午': 2, '全天': 0 };
-                    return (order[a.period] || 3) - (order[b.period] || 3);
+                    const order = { '上午': 1, '下午': 2, '傍晚': 3, '全天': 0 };
+                    return (order[a.period] || 4) - (order[b.period] || 4);
                 });
 
-            // --- 🤖 智慧排程邏輯 (新版) ---
+            // --- 🤖 智慧排程邏輯 (全域重排版) ---
             const parseAndPreview = () => {
                 const lines = importText.split('\n').filter(l => l.trim());
                 const tasks = lines.map(line => {
-                    // 解析邏輯：名稱、區域、備註、指定師傅
                     const parts = line.split(/[,，\s]+/).filter(p => p);
                     const name = parts[0] || '未命名建案';
                     let region = '未分類';
                     let targetMaster = null;
 
-                    // 1. 抓區域
                     const districtMatch = line.match(/(\w+[市縣])?(\w+[區鄉鎮市])/);
                     if (districtMatch) region = districtMatch[2];
-                    else if (parts[1] && parts[1].length < 5) region = parts[1]; // 假設第二個詞短的是區域
+                    else if (parts[1] && parts[1].length < 5) region = parts[1];
 
-                    // 2. 抓指定師傅 (關鍵功能)
                     for (let m of masters) {
-                        // 如果文字裡包含師傅名字 (例如 "陳師傅" 或 "陳")
                         if (line.includes(m.name)) {
                             targetMaster = m;
                             break;
                         }
                     }
 
-                    return { name, region, note: line, targetMaster, original: line };
+                    return { name, region, note: line, targetMaster, original: line, isNew: true };
                 });
                 setParsedTasks(tasks);
             };
 
             const executeAutoSchedule = async () => {
+                if (replanExisting && !confirm(`⚠️ 注意：您勾選了「重新規劃」。\n\n系統將會刪除 ${selectedDate} 之後的所有行程，並依照區域順路邏輯重新安排。\n\n確定要執行嗎？`)) {
+                    return;
+                }
+
                 setIsProcessing(true);
                 const userPath = `users/${user.uid}`;
                 
-                // 1. 建立目前的工作負載表 (Master -> Date -> Count)
-                // 這樣我們才知道哪個師傅哪天已經滿了，不會重複塞
-                const workload = {};
-                assignments.forEach(a => {
-                    if (!workload[a.masterId]) workload[a.masterId] = {};
-                    if (!workload[a.masterId][a.date]) workload[a.masterId][a.date] = 0;
-                    workload[a.masterId][a.date]++;
-                });
+                // 1. 準備待排程清單 (Pool)
+                let tasksPool = [];
 
-                // 2. 開始安排
+                // A. 加入新貼上的建案 (需先建立 Project Document)
                 for (let task of parsedTasks) {
-                    // 先加入建案資料庫
                     const docRef = await db.collection(userPath + '/projects').add({
                         name: task.name,
                         region: task.region,
                         note: task.note,
                         createdAt: Date.now()
                     });
-
-                    // 決定要派給誰
-                    let assignedMaster = task.targetMaster;
                     
-                    // 如果沒指定，就找一個隨機的或輪流 (這裡簡化為隨機，重點在處理"有指定"的)
+                    let assignedMaster = task.targetMaster;
                     if (!assignedMaster) {
                         assignedMaster = masters[Math.floor(Math.random() * masters.length)];
                     }
 
-                    // 3. 幫這位師傅找最近的空檔
-                    let searchDate = new Date(selectedDate); // 從畫面上選的日期開始找
-                    let foundDateStr = '';
+                    tasksPool.push({
+                        projectId: docRef.id,
+                        region: task.region,
+                        masterId: assignedMaster.id,
+                        isFixed: false // 新建案可以自由安排
+                    });
+                }
+
+                // B. 如果要重排，把舊行程也抓進來 Pool
+                if (replanExisting) {
+                    // 找出所有未來行程
+                    const futureAssignments = assignments.filter(a => a.date >= selectedDate);
+                    
+                    for (let a of futureAssignments) {
+                        // 刪除舊的 assignment (稍後會重建)
+                        await db.doc(`${userPath}/assignments/${a.id}`).delete();
+                        
+                        // 找回專案資訊以取得區域
+                        const proj = projects.find(p => p.id === a.projectId);
+                        if (proj) {
+                            tasksPool.push({
+                                projectId: a.projectId,
+                                region: proj.region,
+                                masterId: a.masterId, // 保持原師傅不變
+                                isFixed: false
+                            });
+                        }
+                    }
+                }
+
+                // 2. 建立排程狀態表 (Master -> Date -> { count, regions: Set })
+                const masterSchedule = {};
+                
+                // 載入"保留不動"的行程 (如果是重排，就是 selectedDate 之前的；如果不重排，就是所有的)
+                const existingToKeep = replanExisting 
+                    ? assignments.filter(a => a.date < selectedDate)
+                    : assignments;
+
+                existingToKeep.forEach(a => {
+                    if (!masterSchedule[a.masterId]) masterSchedule[a.masterId] = {};
+                    if (!masterSchedule[a.masterId][a.date]) {
+                        masterSchedule[a.masterId][a.date] = { count: 0, regions: new Set() };
+                    }
+                    masterSchedule[a.masterId][a.date].count++;
+                    const proj = projects.find(p => p.id === a.projectId);
+                    if (proj && proj.region) masterSchedule[a.masterId][a.date].regions.add(proj.region);
+                });
+
+                // 3. 開始對 Pool 裡的任務進行最佳化分配
+                // 技巧：先對 Pool 依照區域排序，讓同區域的任務聚在一起處理
+                tasksPool.sort((a, b) => a.region.localeCompare(b.region));
+
+                for (let task of tasksPool) {
+                    let bestDate = null;
+                    let bestScore = -Infinity;
                     let assignedPeriod = '全天';
 
-                    // 最多往後找 30 天，避免無限迴圈
-                    for (let i = 0; i < 30; i++) {
-                        const dateStr = searchDate.toISOString().split('T')[0];
-                        const currentLoad = (workload[assignedMaster.id] && workload[assignedMaster.id][dateStr]) || 0;
+                    const startDate = new Date(selectedDate);
 
-                        // 假設一天最多接 2 單 (上午+下午)
-                        if (currentLoad < 2) {
-                            foundDateStr = dateStr;
-                            // 簡單判斷時段：如果已經有 1 單，那這單就是下午；如果是 0 單，就是上午
-                            assignedPeriod = currentLoad === 0 ? '上午' : '下午';
-                            
-                            // 更新負載表，以免下一筆任務又塞進來
-                            if (!workload[assignedMaster.id]) workload[assignedMaster.id] = {};
-                            if (!workload[assignedMaster.id][dateStr]) workload[assignedMaster.id][dateStr] = 0;
-                            workload[assignedMaster.id][dateStr]++;
-                            
-                            break;
+                    // 搜尋未來 30 天
+                    for (let i = 0; i < 30; i++) {
+                        const dateObj = new Date(startDate);
+                        dateObj.setDate(startDate.getDate() + i);
+                        const dateStr = dateObj.toISOString().split('T')[0];
+
+                        if (!masterSchedule[task.masterId]) masterSchedule[task.masterId] = {};
+                        const dayState = masterSchedule[task.masterId][dateStr] || { count: 0, regions: new Set() };
+
+                        // 規則：一天最多 3 單
+                        if (dayState.count >= 3) continue;
+
+                        // --- 核心演算法：順路計分 ---
+                        let score = 0;
+
+                        // A. 同區域 (超級加分)
+                        if (dayState.regions.has(task.region)) {
+                            score += 2000;
+                        } 
+                        // B. 完全空閒 (次加分)
+                        else if (dayState.count === 0) {
+                            score += 500;
                         }
-                        // 今天滿了，找明天
-                        searchDate.setDate(searchDate.getDate() + 1);
+                        // C. 不同區域 (扣分)
+                        else {
+                            score -= 200; 
+                        }
+
+                        // D. 日期越近越好
+                        score -= i * 10;
+
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestDate = dateStr;
+                        }
                     }
 
-                    if (foundDateStr) {
+                    if (bestDate) {
+                        if (!masterSchedule[task.masterId][bestDate]) {
+                            masterSchedule[task.masterId][bestDate] = { count: 0, regions: new Set() };
+                        }
+                        const finalDayState = masterSchedule[task.masterId][bestDate];
+                        
+                        if (finalDayState.count === 0) assignedPeriod = '上午';
+                        else if (finalDayState.count === 1) assignedPeriod = '下午';
+                        else assignedPeriod = '傍晚';
+
+                        finalDayState.count++;
+                        finalDayState.regions.add(task.region);
+
                         await db.collection(userPath + '/assignments').add({
-                            projectId: docRef.id,
-                            masterId: assignedMaster.id,
-                            date: foundDateStr,
+                            projectId: task.projectId,
+                            masterId: task.masterId,
+                            date: bestDate,
                             period: assignedPeriod
                         });
                     }
@@ -241,7 +312,8 @@
                 setIsProcessing(false);
                 setImportText('');
                 setParsedTasks([]);
-                alert("排程完成！已依照您指定的師傅尋找最近空檔。");
+                setReplanExisting(false);
+                alert(replanExisting ? "已完成全域重排！行程已依照區域順路最佳化。" : "新增排程完成！");
                 setView('schedule');
             };
 
@@ -249,7 +321,8 @@
                 Check: () => <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"/></svg>,
                 X: () => <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>,
                 Trash: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>,
-                Robot: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.384-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+                Robot: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.384-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>,
+                Refresh: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
             };
 
             return (
@@ -331,7 +404,12 @@
                                                         {tasks.map(t => (
                                                             <div key={t.id} className="bg-white p-2 rounded border shadow-sm relative group mb-2 card-anim">
                                                                 <div className="flex justify-between text-xs text-slate-400 mb-1 border-b border-slate-100 pb-1">
-                                                                    <span className={`px-1.5 rounded ${t.period === '上午' ? 'bg-orange-100 text-orange-600' : t.period === '下午' ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-100'}`}>{t.period || '全天'}</span>
+                                                                    <span className={`px-1.5 rounded ${
+                                                                        t.period === '上午' ? 'bg-orange-100 text-orange-600' : 
+                                                                        t.period === '下午' ? 'bg-indigo-100 text-indigo-600' : 
+                                                                        t.period === '傍晚' ? 'bg-purple-100 text-purple-600' : 
+                                                                        'bg-gray-100'
+                                                                    }`}>{t.period || '全天'}</span>
                                                                     <button onClick={()=>removeAssign(t.id)} className="text-red-400 hover:text-red-600"><Icons.X/></button>
                                                                 </div>
                                                                 <div className="font-bold text-slate-800 text-sm mt-1">{t.project.name}</div>
@@ -351,7 +429,7 @@
                     {view === 'smart' && (
                         <div className="bg-white rounded-xl shadow border border-slate-200 p-6 min-h-[600px]">
                              <h2 className="text-2xl font-bold text-slate-800 mb-2 flex items-center gap-2">
-                                <Icons.Robot/> 智慧排程中心 (指定派工)
+                                <Icons.Robot/> 智慧排程中心
                              </h2>
                              <p className="text-slate-500 mb-6">貼上建案文字，若包含師傅名字 (如: 陳師傅)，系統會自動幫該師傅尋找最近的空檔日期。</p>
                              
@@ -360,9 +438,9 @@
                                     <label className="block font-bold text-slate-700 mb-2">1. 貼上建案 (可插單)</label>
                                     <div className="text-xs text-slate-400 mb-2 bg-slate-100 p-2 rounded">
                                         格式範例：<br/>
-                                        1. 帝寶豪宅, 陳師傅 (自動排給陳師傅，找最近空檔)<br/>
-                                        2. 板橋車站修繕 (未指定，系統隨機分配)<br/>
-                                        3. 信義區 A13, 林師傅, 急件 (自動排給林師傅)
+                                        1. 帝寶豪宅, 陳師傅 (指定師傅)<br/>
+                                        2. 板橋車站修繕 (隨機)<br/>
+                                        3. 信義區 A13, 林師傅, 急件
                                     </div>
                                     <textarea 
                                         className="w-full h-64 p-4 border border-slate-300 rounded-lg bg-slate-50 font-mono text-sm focus:ring-2 focus:ring-blue-500"
@@ -404,17 +482,33 @@
                                     
                                     <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
                                         <div className="mb-4">
-                                            <label className="block text-sm font-bold text-blue-800 mb-1">開始尋找空檔的起始日期</label>
+                                            <label className="block text-sm font-bold text-blue-800 mb-1">排程起始日期</label>
                                             <input type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} className="w-full p-2 border rounded"/>
                                         </div>
+                                        
+                                        <div className="flex items-center gap-2 mb-4 bg-white p-2 rounded border border-blue-200">
+                                            <input 
+                                                type="checkbox" 
+                                                id="replan" 
+                                                checked={replanExisting} 
+                                                onChange={e => setReplanExisting(e.target.checked)}
+                                                className="w-5 h-5 text-blue-600 rounded"
+                                            />
+                                            <label htmlFor="replan" className="text-sm font-bold text-slate-700 cursor-pointer">
+                                                包含現有未來行程一起重新規劃 <span className="text-xs font-normal text-red-500">(會重排 {selectedDate} 之後的行程)</span>
+                                            </label>
+                                        </div>
+
                                         <button 
                                             onClick={executeAutoSchedule}
-                                            disabled={parsedTasks.length === 0 || isProcessing}
-                                            className={`w-full py-3 rounded-lg font-bold text-white shadow-lg transition-all ${parsedTasks.length === 0 ? 'bg-slate-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 hover:scale-[1.02]'}`}
+                                            disabled={parsedTasks.length === 0 && !replanExisting || isProcessing}
+                                            className={`w-full py-3 rounded-lg font-bold text-white shadow-lg transition-all flex items-center justify-center gap-2 ${parsedTasks.length === 0 && !replanExisting ? 'bg-slate-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 hover:scale-[1.02]'}`}
                                         >
-                                            {isProcessing ? '正在計算與寫入...' : '🚀 執行自動排程 (含插單)'}
+                                            {isProcessing ? '正在計算最順路徑...' : (
+                                                <>{replanExisting ? <Icons.Refresh/> : <Icons.Robot/>} {replanExisting ? '執行全域重排' : '執行自動排程'}</>
+                                            )}
                                         </button>
-                                        <p className="text-xs text-blue-400 mt-2 text-center">系統會自動避開師傅已滿的時段</p>
+                                        <p className="text-xs text-blue-400 mt-2 text-center">同區域優先集中 • 每日上限3單</p>
                                     </div>
                                 </div>
                              </div>
