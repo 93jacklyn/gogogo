@@ -82,6 +82,10 @@
             const [parsedTasks, setParsedTasks] = React.useState([]);
             const [isProcessing, setIsProcessing] = React.useState(false);
             const [replanExisting, setReplanExisting] = React.useState(false);
+            
+            // 新增建案表單狀態
+            const [newProject, setNewProject] = React.useState({ name: '', region: '', address: '', note: '' });
+            const [isFormOpen, setIsFormOpen] = React.useState(false);
 
             const defaultMasters = [
                 { name: "陳師傅", skill: "水電", color: "bg-blue-100 border-blue-300 text-blue-800" },
@@ -117,6 +121,12 @@
             }, []);
 
             // --- 操作 ---
+            const addProject = () => {
+                if (!newProject.name) return;
+                db.collection(`${SHARED_PATH}/projects`).add({ ...newProject, createdAt: Date.now() });
+                setNewProject({ name: '', region: '', address: '', note: '' });
+                setIsFormOpen(false);
+            };
             const updateProject = (id, key, val) => db.doc(`${SHARED_PATH}/projects/${id}`).update({ [key]: val });
             const deleteProject = (id) => {
                 if (!confirm("確定刪除？")) return;
@@ -140,7 +150,6 @@
             const openMapRoute = (mId) => {
                 const tasks = getTasks(mId);
                 if (tasks.length === 0) return alert("今天沒有行程");
-                // 依區域排序，讓 Google Maps 跑起來更順
                 const dests = tasks.map(t => encodeURIComponent(t.project.address || `${t.project.region} ${t.project.name}`));
                 window.open(`https://www.google.com/maps/dir/${dests.join('/')}`, '_blank');
             };
@@ -220,7 +229,6 @@
                     if (proj) masterDayStatus[a.masterId][a.date].regions.add(proj.region);
                 });
 
-                // 按區域排序，確保處理時就先群聚
                 pool.sort((a,b) => a.region.localeCompare(b.region));
 
                 for (const task of pool) {
@@ -228,7 +236,6 @@
                     let bestMasterId = task.masterId;
                     let maxScore = -Infinity;
 
-                    // 尋找未來 30 天內最優解
                     const potentialMasters = bestMasterId ? [masters.find(m => m.id === bestMasterId)] : masters;
                     
                     for (const m of potentialMasters) {
@@ -241,14 +248,13 @@
                             if (!masterDayStatus[m.id]) masterDayStatus[m.id] = {};
                             const day = masterDayStatus[m.id][dStr] || { count: 0, regions: new Set() };
 
-                            if (day.count >= 3) continue; // 每日上限
+                            if (day.count >= 3) continue;
 
                             let score = 1000;
-                            // 🚀 核心優化：極大化同區域權重，迫使案子擠在同一天
                             if (day.regions.has(task.region)) score += 5000; 
-                            else if (day.count === 0) score += 500; // 傾向開新的一天
+                            else if (day.count === 0) score += 500;
                             
-                            score -= i * 50; // 日期懲罰，避免排太遠
+                            score -= i * 50;
 
                             if (score > maxScore) {
                                 maxScore = score;
@@ -318,6 +324,7 @@
                                     </div>
                                     <h3 className="text-lg font-bold text-slate-800">{t.project.name}</h3>
                                     <p className="text-sm text-slate-500 mt-1">📍 {t.project.address || "無詳細地址"}</p>
+                                    <div className="mt-2 text-sm text-slate-500 bg-slate-50 p-2 rounded">{t.project.note}</div>
                                     <div className="mt-3 pt-3 border-t border-slate-50 flex gap-2">
                                         <button onClick={() => openSingleMap(t.project)} className="flex-1 bg-slate-50 text-slate-600 py-2 rounded-lg text-sm flex items-center justify-center gap-1 border border-slate-100 font-medium">
                                             <Icons.Map /> 地圖
@@ -371,6 +378,7 @@
                                                 <div className="text-[11px] text-slate-400 mb-2 truncate flex items-center gap-1">
                                                     <Icons.Map /> {p.address || "無詳細地址"}
                                                 </div>
+                                                <div className="text-xs text-slate-500 mb-2 border-l-2 border-slate-100 pl-1">{p.note}</div>
                                                 <div className="flex gap-1 border-t pt-2 mt-1">
                                                     {masters.map(m => {
                                                         const isAssigned = assignments.some(a => a.projectId===p.id && a.masterId===m.id && a.date===selectedDate);
@@ -486,10 +494,11 @@
                                 <button onClick={()=>setIsFormOpen(true)} className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold">+ 新增</button>
                             </div>
                             {isFormOpen && (
-                                <div className="mb-6 p-4 bg-slate-50 rounded-2xl border border-slate-200 grid grid-cols-1 md:grid-cols-4 gap-3">
+                                <div className="mb-6 p-4 bg-slate-50 rounded-2xl border border-slate-200 grid grid-cols-1 md:grid-cols-5 gap-3">
                                     <input placeholder="建案名" className="p-2 border rounded-lg text-sm" value={newProject.name} onChange={e=>setNewProject({...newProject, name:e.target.value})} />
                                     <input placeholder="區域" className="p-2 border rounded-lg text-sm" value={newProject.region} onChange={e=>setNewProject({...newProject, region:e.target.value})} />
                                     <input placeholder="地址" className="p-2 border rounded-lg text-sm" value={newProject.address} onChange={e=>setNewProject({...newProject, address:e.target.value})} />
+                                    <input placeholder="備註" className="p-2 border rounded-lg text-sm" value={newProject.note} onChange={e=>setNewProject({...newProject, note:e.target.value})} />
                                     <div className="flex gap-2">
                                         <button onClick={addProject} className="flex-1 bg-blue-600 text-white rounded-lg font-bold">儲存</button>
                                         <button onClick={()=>setIsFormOpen(false)} className="px-4 bg-slate-200 rounded-lg">取消</button>
@@ -499,7 +508,7 @@
                             <div className="overflow-x-auto">
                                 <table className="w-full text-left text-sm">
                                     <thead className="bg-slate-50 border-b text-slate-500">
-                                        <tr><th className="p-3">區域</th><th className="p-3">建案名</th><th className="p-3">詳細地址</th><th className="p-3">刪除</th></tr>
+                                        <tr><th className="p-3">區域</th><th className="p-3">建案名</th><th className="p-3">詳細地址</th><th className="p-3">備註</th><th className="p-3">刪除</th></tr>
                                     </thead>
                                     <tbody>
                                         {projects.map(p => (
@@ -507,6 +516,7 @@
                                                 <td className="p-3"><EditableInput className="w-20 border-none bg-slate-100 px-2 py-1 rounded text-[11px] font-bold text-center" value={p.region} onSave={v=>updateProject(p.id, 'region', v)} /></td>
                                                 <td className="p-3"><EditableInput className="w-full border-none bg-transparent font-bold" value={p.name} onSave={v=>updateProject(p.id, 'name', v)} /></td>
                                                 <td className="p-3"><EditableInput className="w-full border-none bg-transparent text-slate-500" value={p.address} onSave={v=>updateProject(p.id, 'address', v)} /></td>
+                                                <td className="p-3"><EditableInput className="w-full border-none bg-transparent text-slate-500" value={p.note} onSave={v=>updateProject(p.id, 'note', v)} /></td>
                                                 <td className="p-3"><button onClick={()=>deleteProject(p.id)} className="text-red-300 hover:text-red-500"><Icons.Trash/></button></td>
                                             </tr>
                                         ))}
