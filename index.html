@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>安裝排程 (智慧導航版)</title>
+    <title>安裝排程 (智慧鎖定版)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -26,7 +26,6 @@
         
         .loading { display: flex; justify-content: center; align-items: center; height: 100vh; font-size: 1.5rem; color: #64748b; }
         
-        /* 自定義捲軸 */
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
@@ -50,10 +49,8 @@
             to { opacity: 1; transform: translateY(0); } 
         }
 
-        /* 導航發光效果 */
         .nav-glow { box-shadow: 0 4px 15px -3px rgba(37, 99, 235, 0.2); }
         
-        /* 玻璃擬態效果 */
         .glass {
             background: rgba(255, 255, 255, 0.8);
             backdrop-filter: blur(8px);
@@ -67,7 +64,7 @@
     </div>
 
     <script type="text/babel">
-        // --- Firebase 設定 (您的原始設定已保留) ---
+        // --- Firebase 設定 ---
         const firebaseConfig = {
             apiKey: "AIzaSyBN_fK1oEhocmRCdWy0pfnaLVbhmZQdxlM",
             authDomain: "gogo-ed64b.firebaseapp.com",
@@ -84,11 +81,8 @@
         const auth = firebase.auth();
         const SHARED_PATH = 'company_data/shared_schedule';
 
-        // --- 優化區域顏色系統 ---
         const getRegionStyles = (region) => {
             if (!region || region === '未分類') return "bg-slate-100 text-slate-600 border-slate-200";
-            
-            // 透過字串雜湊決定顏色，確保同區域顏色永遠固定
             const hash = region.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
             const palettes = [
                 "bg-blue-50 text-blue-700 border-blue-200",
@@ -104,7 +98,6 @@
             return palettes[hash % palettes.length];
         };
 
-        // --- 防卡頓輸入框 ---
         const EditableInput = ({ value, onSave, className, placeholder, type="text" }) => {
             const [localValue, setLocalValue] = React.useState(value || '');
             React.useEffect(() => { setLocalValue(value || ''); }, [value]);
@@ -134,13 +127,11 @@
             const [view, setView] = React.useState('schedule');
             const [masterMode, setMasterMode] = React.useState(null);
 
-            // 智慧排程狀態
             const [importText, setImportText] = React.useState('');
             const [parsedTasks, setParsedTasks] = React.useState([]);
             const [isProcessing, setIsProcessing] = React.useState(false);
             const [replanExisting, setReplanExisting] = React.useState(false);
             
-            // 表單狀態
             const [newProject, setNewProject] = React.useState({ name: '', region: '', address: '', note: '' });
             const [isFormOpen, setIsFormOpen] = React.useState(false);
 
@@ -178,7 +169,6 @@
                 return () => unsubscribe();
             }, []);
 
-            // --- 操作 ---
             const updateProject = (id, key, val) => db.doc(`${SHARED_PATH}/projects/${id}`).update({ [key]: val });
             const deleteProject = (id) => {
                 if (!confirm("確定刪除？")) return;
@@ -194,10 +184,15 @@
             const assign = (pid, mid) => {
                 const exists = assignments.find(a => a.date === selectedDate && a.masterId === mid && a.projectId === pid);
                 if (exists) return;
-                db.collection(`${SHARED_PATH}/assignments`).add({ projectId: pid, masterId: mid, date: selectedDate, period: '全天' });
+                db.collection(`${SHARED_PATH}/assignments`).add({ projectId: pid, masterId: mid, date: selectedDate, period: '全天', isFixed: false });
             };
             const removeAssign = (aid) => db.doc(`${SHARED_PATH}/assignments/${aid}`).delete();
             const updateMaster = (id, key, val) => db.doc(`${SHARED_PATH}/masters/${id}`).update({ [key]: val });
+            
+            // 🟢 切換鎖定狀態
+            const toggleLock = (aid, currentStatus) => {
+                db.doc(`${SHARED_PATH}/assignments/${aid}`).update({ isFixed: !currentStatus });
+            };
 
             const getTasks = (mid, date = selectedDate) => assignments
                 .filter(a => a.date === date && a.masterId === mid)
@@ -239,7 +234,7 @@
                         else { address = parts[1]; }
                     }
                     const distMatch = line.match(/(\w+[市縣])?(\w+[區鄉鎮市])/);
-                    if (distMatch) region = districtMatch[2];
+                    if (distMatch) region = distMatch[2];
                     
                     masters.forEach(m => { if(line.includes(m.name)) targetMaster = m; });
                     return { name, region, address, note, targetMaster };
@@ -247,8 +242,9 @@
                 setParsedTasks(tasks);
             };
 
+            // 🟢 智慧排程邏輯 (更新版：支援鎖定插單)
             const executeSchedule = async () => {
-                if (replanExisting && !confirm("全域重新規劃會更動所有未來行程，確定嗎？")) return;
+                if (replanExisting && !confirm("確定要執行全域重排？\n⚠️ 系統會保留「已鎖定」的行程，但會清除並重新安排其他未來行程。")) return;
                 setIsProcessing(true);
 
                 const tasksToAssign = [];
@@ -264,9 +260,12 @@
                 }
 
                 let pool = [...tasksToAssign];
+                
                 if (replanExisting) {
-                    const future = assignments.filter(a => a.date >= selectedDate);
-                    for (const a of future) {
+                    // 🟢 關鍵修正：只抓取「未來」且「未鎖定」的行程來重排
+                    const futureToReplan = assignments.filter(a => a.date >= selectedDate && !a.isFixed);
+                    
+                    for (const a of futureToReplan) {
                         await db.doc(`${SHARED_PATH}/assignments/${a.id}`).delete();
                         const p = projects.find(proj => proj.id === a.projectId);
                         if (p) pool.push({ projectId: a.projectId, region: p.region, masterId: a.masterId });
@@ -274,7 +273,13 @@
                 }
 
                 const masterDayStatus = {}; 
-                const existing = replanExisting ? assignments.filter(a => a.date < selectedDate) : assignments;
+                
+                // 🟢 關鍵修正：初始化狀態時，要包含「過去的」以及「未來已鎖定」的行程
+                // 這樣系統才知道那天已經有急件插單了，不能再塞太多
+                const existing = replanExisting 
+                    ? assignments.filter(a => a.date < selectedDate || (a.date >= selectedDate && a.isFixed)) 
+                    : assignments;
+
                 existing.forEach(a => {
                     if (!masterDayStatus[a.masterId]) masterDayStatus[a.masterId] = {};
                     if (!masterDayStatus[a.masterId][a.date]) masterDayStatus[a.masterId][a.date] = { count: 0, regions: new Set() };
@@ -314,7 +319,7 @@
                         const periods = ['上午', '下午', '傍晚'];
                         const period = periods[targetDay.count] || '全天';
                         await db.collection(SHARED_PATH + '/assignments').add({
-                            projectId: task.projectId, masterId: bestMasterId, date: bestDate, period: period
+                            projectId: task.projectId, masterId: bestMasterId, date: bestDate, period: period, isFixed: false
                         });
                         targetDay.count++;
                         targetDay.regions.add(task.region);
@@ -323,7 +328,7 @@
                 setIsProcessing(false);
                 setImportText('');
                 setParsedTasks([]);
-                alert("智慧集中排程完成！");
+                alert("智慧集中排程完成！(已保留鎖定行程)");
                 setView('schedule');
             };
 
@@ -334,7 +339,9 @@
                 X: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>,
                 Share: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>,
                 Robot: () => <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>,
-                Plus: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"/></svg>
+                Plus: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"/></svg>,
+                Lock: () => <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 17a2 2 0 100-4 2 2 0 000 4zm6-9h-1V6a5 5 0 00-10 0v2H6a3 3 0 00-3 3v8a3 3 0 003 3h12a3 3 0 003-3v-8a3 3 0 00-3-3zM9 6a3 3 0 016 0v2H9V6z"/></svg>,
+                Unlock: () => <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"/></svg>
             };
 
             // --- 師傅模式 ---
@@ -361,10 +368,13 @@
 
                         <div className="space-y-4">
                             {tasks.map(t => (
-                                <div key={t.id} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 card-anim relative overflow-hidden">
-                                    <div className="absolute top-0 left-0 w-2 h-full bg-blue-500"></div>
+                                <div key={t.id} className={`bg-white p-5 rounded-3xl shadow-sm border border-slate-100 card-anim relative overflow-hidden ${t.isFixed ? 'ring-2 ring-red-400' : ''}`}>
+                                    <div className={`absolute top-0 left-0 w-2 h-full ${t.isFixed ? 'bg-red-500' : 'bg-blue-500'}`}></div>
                                     <div className="flex justify-between items-center mb-3">
-                                        <span className="text-xs font-black text-blue-700 bg-blue-50 px-3 py-1.5 rounded-full border border-blue-100 uppercase tracking-widest">{t.period || '全天'}</span>
+                                        <div className="flex gap-2">
+                                            <span className="text-xs font-black text-blue-700 bg-blue-50 px-3 py-1.5 rounded-full border border-blue-100 uppercase tracking-widest">{t.period || '全天'}</span>
+                                            {t.isFixed && <span className="text-xs font-black text-white bg-red-500 px-2 py-1.5 rounded-full">急件</span>}
+                                        </div>
                                         <span className={`region-tag px-3 py-1 border text-[10px] ${getRegionStyles(t.project.region)}`}>{t.project.region}</span>
                                     </div>
                                     <h3 className="text-xl font-black text-slate-800 mb-2">{t.project.name}</h3>
@@ -424,7 +434,7 @@
                                 </div>
                                 <div className="hidden md:block h-10 w-px bg-slate-200"></div>
                                 <div className="text-sm font-medium text-slate-500 italic">
-                                    "選擇日期，將左側建案分派給師傅，系統會自動儲存。"
+                                    "點擊卡片右上角的鎖頭，可將重要插單鎖定，避免被智慧排程覆蓋。"
                                 </div>
                             </div>
 
@@ -486,9 +496,15 @@
                                                     </div>
                                                     <div className="p-4 space-y-4 overflow-y-auto flex-1 bg-slate-50/30">
                                                         {tasks.map(t => (
-                                                            <div key={t.id} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm relative group card-anim border-l-4" style={{borderLeftColor: m.color.split(' ')[0].replace('bg-', '') }}>
+                                                            <div key={t.id} className={`bg-white p-5 rounded-3xl border shadow-sm relative group card-anim border-l-4 ${t.isFixed ? 'border-red-500 ring-2 ring-red-100' : 'border-slate-100'}`} style={{borderLeftColor: t.isFixed ? '#ef4444' : m.color.split(' ')[0].replace('bg-', '') }}>
                                                                 <div className="flex justify-between text-[10px] text-slate-400 mb-3 border-b border-slate-50 pb-2">
-                                                                    <span className="font-black text-blue-600 uppercase tracking-widest">{t.period || '全天'}</span>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="font-black text-blue-600 uppercase tracking-widest">{t.period || '全天'}</span>
+                                                                        {/* 鎖定按鈕 */}
+                                                                        <button onClick={() => toggleLock(t.id, t.isFixed)} className={`transition-colors ${t.isFixed ? 'text-red-500' : 'text-slate-300 hover:text-slate-500'}`} title={t.isFixed ? "急件鎖定中 (不會被重排)" : "點擊鎖定"}>
+                                                                            {t.isFixed ? <Icons.Lock/> : <Icons.Unlock/>}
+                                                                        </button>
+                                                                    </div>
                                                                     <button onClick={()=>removeAssign(t.id)} className="text-slate-300 hover:text-rose-500 transition-colors"><Icons.X/></button>
                                                                 </div>
                                                                 <div className="font-black text-slate-800 text-base mb-1">{t.project.name}</div>
@@ -579,7 +595,7 @@
                                             </div>
                                             <label className="flex items-center gap-3 cursor-pointer bg-slate-900 p-4 rounded-2xl border border-slate-700 mb-6 hover:bg-slate-800 transition-all">
                                                 <input type="checkbox" checked={replanExisting} onChange={e=>setReplanExisting(e.target.checked)} className="w-5 h-5 text-blue-600 rounded-lg bg-slate-800 border-slate-600" />
-                                                <span className="text-sm font-bold text-slate-300">清空未來所有排程並重新規劃</span>
+                                                <span className="text-sm font-bold text-slate-300">重排未來行程 <span className="text-red-400">(鎖定行程將被保留)</span></span>
                                             </label>
                                             <button 
                                                 onClick={executeSchedule}
