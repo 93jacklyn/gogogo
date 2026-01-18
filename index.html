@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>安裝排程 </title>
+    <title>安裝排程</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -15,33 +15,45 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
 
+    <!-- 引入漂亮的字體 -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
-        
         body { 
-            font-family: 'Noto Sans TC', "Microsoft JhengHei", sans-serif; 
-            -webkit-font-smoothing: antialiased; 
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            font-family: 'Noto Sans TC', system-ui, -apple-system, sans-serif; 
+            background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+            color: #1e293b;
+            -webkit-font-smoothing: antialiased;
         }
         
-        .loading { display: flex; justify-content: center; align-items: center; height: 100vh; font-size: 1.5rem; color: #64748b; }
+        .loading { display: flex; justify-content: center; align-items: center; height: 100vh; font-size: 1.2rem; color: #64748b; font-weight: bold; }
         
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        /* 自定義捲軸 */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
         ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
+        /* 輸入框美化 */
         input:focus, textarea:focus { 
             outline: none; 
-            border-color: #3b82f6; 
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+            border-color: #6366f1; 
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1); 
         }
 
-        .card-anim { 
-            animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1); 
-            transition: all 0.2s;
+        /* 玻璃擬態卡片 */
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
         }
-        
+
+        /* 動畫 */
+        .card-anim { 
+            animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1); 
+            transition: all 0.2s ease; 
+        }
         .card-anim:hover { transform: translateY(-2px); }
 
         @keyframes fadeIn { 
@@ -49,18 +61,23 @@
             to { opacity: 1; transform: translateY(0); } 
         }
 
-        .nav-glow { box-shadow: 0 4px 15px -3px rgba(37, 99, 235, 0.2); }
-        
-        .glass {
-            background: rgba(255, 255, 255, 0.8);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
+        .region-tag {
+            font-size: 0.7rem;
+            font-weight: 800;
+            padding: 2px 8px;
+            border-radius: 99px;
+            letter-spacing: 0.05em;
         }
     </style>
 </head>
-<body class="text-slate-900 min-h-screen">
+<body class="min-h-screen pb-20">
     <div id="root">
-        <div class="loading">正在啟動雲端系統...</div>
+        <div class="loading">
+            <div class="flex flex-col items-center gap-4">
+                <div class="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                <span>系統連線中...</span>
+            </div>
+        </div>
     </div>
 
     <script type="text/babel">
@@ -81,19 +98,19 @@
         const auth = firebase.auth();
         const SHARED_PATH = 'company_data/shared_schedule';
 
+        // --- 顏色生成器 (更柔和的色系) ---
         const getRegionStyles = (region) => {
-            if (!region || region === '未分類') return "bg-slate-100 text-slate-600 border-slate-200";
+            if (!region || region === '未分類') return "bg-slate-100 text-slate-500 border border-slate-200";
             const hash = region.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
             const palettes = [
-                "bg-blue-50 text-blue-700 border-blue-200",
-                "bg-rose-50 text-rose-700 border-rose-200",
-                "bg-amber-50 text-amber-700 border-amber-200",
-                "bg-emerald-50 text-emerald-700 border-emerald-200",
-                "bg-indigo-50 text-indigo-700 border-indigo-200",
-                "bg-cyan-50 text-cyan-700 border-cyan-200",
-                "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200",
-                "bg-orange-50 text-orange-700 border-orange-200",
-                "bg-violet-50 text-violet-700 border-violet-200"
+                "bg-blue-50 text-blue-600 border border-blue-100",
+                "bg-rose-50 text-rose-600 border border-rose-100",
+                "bg-amber-50 text-amber-600 border border-amber-100",
+                "bg-emerald-50 text-emerald-600 border border-emerald-100",
+                "bg-violet-50 text-violet-600 border border-violet-100",
+                "bg-cyan-50 text-cyan-600 border border-cyan-100",
+                "bg-orange-50 text-orange-600 border border-orange-100",
+                "bg-fuchsia-50 text-fuchsia-600 border border-fuchsia-100"
             ];
             return palettes[hash % palettes.length];
         };
@@ -107,7 +124,7 @@
             return (
                 <input 
                     type={type}
-                    className={`transition-all duration-200 ${className}`} 
+                    className={`bg-transparent transition-colors duration-200 ${className}`} 
                     value={localValue} 
                     onChange={e => setLocalValue(e.target.value)} 
                     onBlur={handleBlur}
@@ -135,6 +152,14 @@
             const [newProject, setNewProject] = React.useState({ name: '', region: '', address: '', note: '' });
             const [isFormOpen, setIsFormOpen] = React.useState(false);
 
+            const defaultMasters = [
+                { name: "陳師傅", skill: "水電", color: "bg-blue-500 text-white" },
+                { name: "林師傅", skill: "木工", color: "bg-amber-500 text-white" },
+                { name: "張師傅", skill: "泥作", color: "bg-slate-600 text-white" },
+                { name: "王師傅", skill: "油漆", color: "bg-emerald-500 text-white" },
+                { name: "李師傅", skill: "雜項", color: "bg-violet-500 text-white" }
+            ];
+
             React.useEffect(() => {
                 const urlParams = new URLSearchParams(window.location.search);
                 const mName = urlParams.get('m');
@@ -147,22 +172,13 @@
                 const unsubscribe = auth.onAuthStateChanged(u => {
                     setUser(u);
                     if (u) {
-                        setStatusMsg(mName ? `👷 ${mName}` : "🟢 管理員");
+                        setStatusMsg(mName ? `👷 ${mName}` : "🟢 線上");
                         db.collection(SHARED_PATH + '/projects').onSnapshot(s => setProjects(s.docs.map(d => ({id: d.id, ...d.data()}))));
                         db.collection(SHARED_PATH + '/assignments').onSnapshot(s => setAssignments(s.docs.map(d => ({id: d.id, ...d.data()}))));
                         db.collection(SHARED_PATH + '/masters').onSnapshot(s => {
                             const list = s.docs.map(d => ({id: d.id, ...d.data()}));
-                            if (list.length === 0) {
-                                [
-                                    { name: "陳師傅", skill: "水電", color: "bg-blue-500 border-blue-600 text-white" },
-                                    { name: "林師傅", skill: "木工", color: "bg-amber-500 border-amber-600 text-white" },
-                                    { name: "張師傅", skill: "泥作", color: "bg-stone-500 border-stone-600 text-white" },
-                                    { name: "王師傅", skill: "油漆", color: "bg-emerald-500 border-emerald-600 text-white" },
-                                    { name: "李師傅", skill: "雜項", color: "bg-violet-500 border-violet-600 text-white" }
-                                ].forEach(m => db.collection(SHARED_PATH + '/masters').add(m));
-                            } else {
-                                setMasters(list.sort((a,b) => a.name.localeCompare(b.name)));
-                            }
+                            if (list.length === 0) defaultMasters.forEach(m => db.collection(SHARED_PATH + '/masters').add(m));
+                            else setMasters(list.sort((a,b) => a.name.localeCompare(b.name)));
                         });
                     }
                 });
@@ -188,8 +204,6 @@
             };
             const removeAssign = (aid) => db.doc(`${SHARED_PATH}/assignments/${aid}`).delete();
             const updateMaster = (id, key, val) => db.doc(`${SHARED_PATH}/masters/${id}`).update({ [key]: val });
-            
-            // 🟢 切換鎖定狀態
             const toggleLock = (aid, currentStatus) => {
                 db.doc(`${SHARED_PATH}/assignments/${aid}`).update({ isFixed: !currentStatus });
             };
@@ -242,7 +256,6 @@
                 setParsedTasks(tasks);
             };
 
-            // 🟢 智慧排程邏輯 (更新版：支援鎖定插單)
             const executeSchedule = async () => {
                 if (replanExisting && !confirm("確定要執行全域重排？\n⚠️ 系統會保留「已鎖定」的行程，但會清除並重新安排其他未來行程。")) return;
                 setIsProcessing(true);
@@ -260,11 +273,8 @@
                 }
 
                 let pool = [...tasksToAssign];
-                
                 if (replanExisting) {
-                    // 🟢 關鍵修正：只抓取「未來」且「未鎖定」的行程來重排
                     const futureToReplan = assignments.filter(a => a.date >= selectedDate && !a.isFixed);
-                    
                     for (const a of futureToReplan) {
                         await db.doc(`${SHARED_PATH}/assignments/${a.id}`).delete();
                         const p = projects.find(proj => proj.id === a.projectId);
@@ -273,9 +283,6 @@
                 }
 
                 const masterDayStatus = {}; 
-                
-                // 🟢 關鍵修正：初始化狀態時，要包含「過去的」以及「未來已鎖定」的行程
-                // 這樣系統才知道那天已經有急件插單了，不能再塞太多
                 const existing = replanExisting 
                     ? assignments.filter(a => a.date < selectedDate || (a.date >= selectedDate && a.isFixed)) 
                     : assignments;
@@ -328,17 +335,17 @@
                 setIsProcessing(false);
                 setImportText('');
                 setParsedTasks([]);
-                alert("智慧集中排程完成！(已保留鎖定行程)");
+                alert("完成！智慧集中排程完畢。");
                 setView('schedule');
             };
 
             const Icons = {
-                Map: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>,
-                Trash: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>,
+                Map: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>,
+                Trash: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>,
                 Check: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"/></svg>,
                 X: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>,
                 Share: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>,
-                Robot: () => <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>,
+                Robot: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>,
                 Plus: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"/></svg>,
                 Lock: () => <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 17a2 2 0 100-4 2 2 0 000 4zm6-9h-1V6a5 5 0 00-10 0v2H6a3 3 0 00-3 3v8a3 3 0 003 3h12a3 3 0 003-3v-8a3 3 0 00-3-3zM9 6a3 3 0 016 0v2H9V6z"/></svg>,
                 Unlock: () => <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"/></svg>
@@ -349,40 +356,42 @@
                 const currentMaster = masters.find(m => m.name === masterMode);
                 const tasks = currentMaster ? getTasks(currentMaster.id) : [];
                 return (
-                    <div className="min-h-screen bg-slate-50 p-4 max-w-lg mx-auto">
-                        <header className="glass p-6 rounded-3xl shadow-xl mb-6 text-center border border-white">
-                            <div className="w-20 h-20 bg-blue-600 text-white rounded-full flex items-center justify-center text-3xl font-black mx-auto mb-4 shadow-lg">{masterMode[0]}</div>
-                            <h1 className="text-2xl font-black text-slate-800 tracking-tight">{masterMode} 的工作行程</h1>
-                            <div className="mt-3 inline-flex items-center px-4 py-2 bg-slate-100 rounded-2xl">
-                                <input type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} className="bg-transparent border-none font-bold text-blue-600 focus:ring-0 text-center" />
+                    <div className="min-h-screen p-4 max-w-lg mx-auto bg-slate-50">
+                        <header className="bg-white p-6 rounded-3xl shadow-xl shadow-slate-200/50 mb-6 text-center border border-white">
+                            <div className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center text-2xl font-bold text-white shadow-lg mb-3 ${currentMaster ? currentMaster.color.split(' ')[0] : 'bg-slate-400'}`}>
+                                {masterMode[0]}
+                            </div>
+                            <h1 className="text-xl font-bold text-slate-800 tracking-tight">{masterMode} 的工作行程</h1>
+                            <div className="mt-3 inline-block px-4 py-1.5 bg-slate-100 rounded-full">
+                                <input type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} className="bg-transparent border-none font-bold text-slate-600 focus:ring-0 text-center text-sm" />
                             </div>
                         </header>
 
                         {tasks.length > 0 ? (
-                            <button onClick={() => openMapRoute(currentMaster.id)} className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black py-5 rounded-3xl shadow-blue-200 shadow-2xl flex items-center justify-center gap-3 mb-6 active:scale-95 transition-all">
-                                <Icons.Map /> 開始導航路線
+                            <button onClick={() => openMapRoute(currentMaster.id)} className="w-full bg-gradient-to-r from-indigo-500 to-blue-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-500/30 flex items-center justify-center gap-2 mb-6 active:scale-95 transition-all">
+                                <Icons.Map /> 開始今日路線導航
                             </button>
                         ) : (
-                            <div className="bg-white/50 backdrop-blur-sm p-12 rounded-3xl text-center text-slate-400 border border-slate-200 border-dashed italic">今天可以休息喔！暫無排程</div>
+                            <div className="bg-white/60 p-10 rounded-3xl text-center text-slate-400 border border-dashed border-slate-300">今天無排程，可以休息喔！☕</div>
                         )}
 
                         <div className="space-y-4">
                             {tasks.map(t => (
-                                <div key={t.id} className={`bg-white p-5 rounded-3xl shadow-sm border border-slate-100 card-anim relative overflow-hidden ${t.isFixed ? 'ring-2 ring-red-400' : ''}`}>
-                                    <div className={`absolute top-0 left-0 w-2 h-full ${t.isFixed ? 'bg-red-500' : 'bg-blue-500'}`}></div>
-                                    <div className="flex justify-between items-center mb-3">
+                                <div key={t.id} className={`bg-white p-5 rounded-3xl shadow-sm border border-slate-100 card-anim relative overflow-hidden ${t.isFixed ? 'ring-1 ring-rose-400' : ''}`}>
+                                    <div className={`absolute top-0 left-0 w-1.5 h-full ${t.isFixed ? 'bg-rose-500' : 'bg-indigo-500'}`}></div>
+                                    <div className="flex justify-between items-center mb-2">
                                         <div className="flex gap-2">
-                                            <span className="text-xs font-black text-blue-700 bg-blue-50 px-3 py-1.5 rounded-full border border-blue-100 uppercase tracking-widest">{t.period || '全天'}</span>
-                                            {t.isFixed && <span className="text-xs font-black text-white bg-red-500 px-2 py-1.5 rounded-full">急件</span>}
+                                            <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md">{t.period || '全天'}</span>
+                                            {t.isFixed && <span className="text-xs font-bold text-white bg-rose-500 px-2 py-1 rounded-md">急件</span>}
                                         </div>
-                                        <span className={`region-tag px-3 py-1 border text-[10px] ${getRegionStyles(t.project.region)}`}>{t.project.region}</span>
+                                        <span className={`region-tag ${getRegionStyles(t.project.region)}`}>{t.project.region}</span>
                                     </div>
-                                    <h3 className="text-xl font-black text-slate-800 mb-2">{t.project.name}</h3>
-                                    <p className="text-slate-500 text-sm flex items-start gap-2 mb-4 leading-relaxed">
-                                        <Icons.Map /> {t.project.address || "無詳細地址"}
+                                    <h3 className="text-lg font-bold text-slate-800 mb-1">{t.project.name}</h3>
+                                    <p className="text-slate-500 text-sm flex items-start gap-1 mb-3">
+                                        <span className="mt-0.5"><Icons.Map /></span> {t.project.address || "無詳細地址"}
                                     </p>
-                                    <div className="bg-slate-50 p-3 rounded-2xl text-sm text-slate-600 mb-4 font-medium italic border border-slate-100">{t.project.note}</div>
-                                    <button onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(t.project.address || t.project.name)}`, '_blank')} className="w-full bg-slate-800 text-white py-3 rounded-2xl flex items-center justify-center gap-2 font-bold text-sm">
+                                    {t.project.note && <div className="bg-slate-50 p-3 rounded-2xl text-sm text-slate-600 mb-4">{t.project.note}</div>}
+                                    <button onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(t.project.address || t.project.name)}`, '_blank')} className="w-full bg-slate-800 text-white py-2.5 rounded-xl flex items-center justify-center gap-2 font-bold text-sm hover:bg-slate-700 transition-colors">
                                         <Icons.Map /> 單點查看
                                     </button>
                                 </div>
@@ -394,29 +403,31 @@
 
             // --- 管理員介面 ---
             return (
-                <div className="min-h-screen pb-20 max-w-[1440px] mx-auto lg:px-8 px-4">
+                <div className="max-w-[1400px] mx-auto lg:px-8 px-4 py-4">
                     {/* 頂部導航 */}
-                    <header className="flex flex-col lg:flex-row justify-between items-center bg-slate-900 text-white p-4 lg:p-6 rounded-b-[2rem] lg:rounded-3xl shadow-2xl mb-8 nav-glow mt-0 lg:mt-4">
-                        <div className="flex items-center gap-4 mb-4 lg:mb-0">
-                            <div className="bg-gradient-to-br from-blue-400 to-indigo-600 p-3 rounded-2xl text-white shadow-lg rotate-3">
+                    <header className="flex flex-col lg:flex-row justify-between items-center bg-slate-900 text-white p-4 lg:p-5 rounded-[2rem] shadow-2xl mb-8 mt-2 relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500 rounded-full filter blur-[80px] opacity-20 -mr-16 -mt-16 pointer-events-none"></div>
+                        
+                        <div className="flex items-center gap-4 mb-4 lg:mb-0 z-10">
+                            <div className="bg-white/10 backdrop-blur-md p-3 rounded-2xl text-white shadow-inner border border-white/20">
                                 <Icons.Robot />
                             </div>
                             <div>
-                                <h1 className="text-2xl font-black tracking-tight">安裝排程助手 <span className="text-blue-400">Pro</span></h1>
-                                <div className="flex items-center gap-2">
-                                    <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
-                                    <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase">{statusMsg}</span>
+                                <h1 className="text-xl font-bold tracking-wide">工班調度助手 <span className="text-indigo-400">Pro</span></h1>
+                                <div className="flex items-center gap-2 mt-1">
+                                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                                    <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">{statusMsg}</span>
                                 </div>
                             </div>
                         </div>
-                        <div className="flex bg-slate-800/50 p-1.5 rounded-2xl overflow-x-auto max-w-full glass">
+                        <div className="flex bg-slate-800/50 p-1.5 rounded-2xl overflow-x-auto max-w-full glass-panel border-0 z-10">
                             {[
                                 { id: 'schedule', label: '每日派工' },
                                 { id: 'projects', label: '建案庫' },
                                 { id: 'settings', label: '師傅名單' },
                                 { id: 'smart', label: '智慧排程' }
                             ].map(v => (
-                                <button key={v.id} onClick={()=>setView(v.id)} className={`px-6 py-2.5 rounded-xl whitespace-nowrap text-sm font-bold transition-all ${view===v.id ? 'bg-white text-slate-900 shadow-xl scale-105' : 'text-slate-400 hover:text-white'}`}>{v.label}</button>
+                                <button key={v.id} onClick={()=>setView(v.id)} className={`px-5 py-2 rounded-xl whitespace-nowrap text-sm font-bold transition-all ${view===v.id ? 'bg-white text-slate-900 shadow-lg scale-105' : 'text-slate-400 hover:text-white'}`}>{v.label}</button>
                             ))}
                         </div>
                     </header>
@@ -424,40 +435,39 @@
                     {/* 排程視圖 */}
                     {view === 'schedule' && (
                         <div className="space-y-6">
-                            <div className="bg-white/80 glass p-5 rounded-[2rem] shadow-xl border border-white flex flex-col md:flex-row items-center gap-6">
-                                <div className="flex items-center gap-4 bg-slate-100/50 p-2 pr-6 rounded-3xl border border-slate-200/50">
-                                    <span className="bg-white p-3 rounded-2xl shadow-sm text-blue-600">📅</span>
-                                    <div>
-                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">施工日期</p>
-                                        <input type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} className="bg-transparent border-none font-black text-slate-800 text-lg focus:ring-0 cursor-pointer p-0"/>
+                            <div className="bg-white/80 glass-panel p-4 rounded-3xl shadow-sm flex flex-col md:flex-row items-center justify-between gap-6">
+                                <div className="flex items-center gap-3">
+                                    <div className="bg-indigo-100 p-2 rounded-xl text-indigo-600">📅</div>
+                                    <div className="flex flex-col">
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase">施工日期</label>
+                                        <input type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} className="bg-transparent border-none font-bold text-slate-700 text-lg p-0 focus:ring-0 cursor-pointer"/>
                                     </div>
                                 </div>
-                                <div className="hidden md:block h-10 w-px bg-slate-200"></div>
-                                <div className="text-sm font-medium text-slate-500 italic">
-                                    "點擊卡片右上角的鎖頭，可將重要插單鎖定，避免被智慧排程覆蓋。"
+                                <div className="text-xs font-medium text-slate-400 bg-slate-100 px-4 py-2 rounded-full">
+                                    提示：點擊卡片右上角的鎖頭 <span className="text-rose-500"><Icons.Lock/></span> 可鎖定急件
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                                 {/* 建案池 */}
-                                <div className="lg:col-span-4 bg-white/40 glass rounded-[2.5rem] shadow-2xl border border-white h-[800px] flex flex-col overflow-hidden">
-                                    <div className="p-6 border-b border-slate-100 bg-white/50 flex justify-between items-center">
-                                        <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
-                                            <span className="text-blue-500">📋</span> 待派工建案
+                                <div className="lg:col-span-3 bg-white/60 glass-panel rounded-[2rem] shadow-xl border-0 h-[800px] flex flex-col overflow-hidden">
+                                    <div className="p-5 border-b border-slate-200/50 bg-white/50 flex justify-between items-center backdrop-blur-sm">
+                                        <h2 className="font-bold text-slate-700 flex items-center gap-2">
+                                            待派工 <span className="bg-slate-200 text-slate-600 text-xs px-2 py-0.5 rounded-full">{projects.length}</span>
                                         </h2>
-                                        <span className="bg-blue-600 text-white text-[10px] font-black px-3 py-1 rounded-full shadow-lg shadow-blue-100">{projects.length}</span>
+                                        <button onClick={()=>setView('projects')} className="w-8 h-8 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100 transition-colors"><Icons.Plus/></button>
                                     </div>
-                                    <div className="overflow-y-auto p-5 space-y-4 flex-1">
+                                    <div className="overflow-y-auto p-4 space-y-3 flex-1">
                                         {projects.map(p => (
-                                            <div key={p.id} className="bg-white border border-slate-100 rounded-3xl p-5 shadow-sm hover:shadow-xl hover:border-blue-200 transition-all card-anim group">
-                                                <div className="flex justify-between items-start mb-3 gap-2">
-                                                    <div className="font-black text-slate-800 text-lg leading-tight flex-1">{p.name}</div>
-                                                    <span className={`region-tag border shrink-0 ${getRegionStyles(p.region)}`}>{p.region}</span>
+                                            <div key={p.id} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 hover:shadow-md hover:border-indigo-200 transition-all card-anim group">
+                                                <div className="flex justify-between items-start mb-2 gap-2">
+                                                    <div className="font-bold text-slate-800 text-sm leading-tight flex-1">{p.name}</div>
+                                                    <span className={`region-tag ${getRegionStyles(p.region)}`}>{p.region}</span>
                                                 </div>
-                                                <div className="text-[11px] text-slate-400 mb-3 flex items-center gap-1.5 leading-tight italic">
-                                                    <Icons.Map /> {p.address || "無詳細地址"}
+                                                <div className="text-xs text-slate-400 mb-3 flex items-start gap-1 leading-tight">
+                                                    <span className="mt-0.5"><Icons.Map /></span> <span className="line-clamp-2">{p.address || "無詳細地址"}</span>
                                                 </div>
-                                                <div className="flex gap-2 border-t border-slate-50 pt-4 mt-2">
+                                                <div className="grid grid-cols-5 gap-1 border-t border-slate-50 pt-3">
                                                     {masters.map(m => {
                                                         const isAssigned = assignments.some(a => a.projectId===p.id && a.masterId===m.id && a.date===selectedDate);
                                                         return (
@@ -465,7 +475,7 @@
                                                                 key={m.id} 
                                                                 onClick={()=>assign(p.id, m.id)} 
                                                                 disabled={isAssigned} 
-                                                                className={`flex-1 h-9 rounded-xl text-[11px] font-black transition-all border shadow-sm flex items-center justify-center ${isAssigned ? 'bg-green-500 border-green-600 text-white cursor-default scale-95 shadow-inner' : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-900 hover:text-white hover:border-slate-900'}`}
+                                                                className={`h-8 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center ${isAssigned ? 'bg-emerald-500 text-white shadow-inner' : 'bg-slate-50 text-slate-400 hover:bg-indigo-600 hover:text-white'}`}
                                                                 title={`派給 ${m.name}`}
                                                             >
                                                                 {isAssigned ? <Icons.Check/> : m.name[0]}
@@ -479,45 +489,48 @@
                                 </div>
 
                                 {/* 師傅欄位 */}
-                                <div className="lg:col-span-8 overflow-x-auto pb-6">
-                                    <div className="flex gap-6 min-w-[1000px] h-full">
+                                <div className="lg:col-span-9 overflow-x-auto pb-4">
+                                    <div className="flex gap-4 min-w-full h-full">
                                         {masters.map(m => {
                                             const tasks = getTasks(m.id);
                                             return (
-                                                <div key={m.id} className="flex-1 min-w-[280px] bg-white/40 glass rounded-[2.5rem] shadow-2xl border border-white h-[800px] flex flex-col overflow-hidden">
-                                                    <div className="p-6 border-b-4 border-slate-100/50" style={{ borderBottomColor: m.color.includes('blue') ? '#3b82f6' : m.color.includes('amber') ? '#f59e0b' : m.color.includes('emerald') ? '#10b981' : m.color.includes('violet') ? '#8b5cf6' : '#78716c' }}>
-                                                        <div className="flex justify-between items-center mb-4">
-                                                            <span className="text-2xl font-black text-slate-800 tracking-tighter">{m.name}</span>
-                                                            <span className="text-[10px] font-black bg-slate-900 text-white px-3 py-1 rounded-full uppercase tracking-widest">{m.skill}</span>
+                                                <div key={m.id} className="flex-1 min-w-[260px] bg-white rounded-[2rem] shadow-lg border border-slate-100 h-[800px] flex flex-col overflow-hidden">
+                                                    <div className="p-5 border-b border-slate-100 bg-slate-50/50">
+                                                        <div className="flex justify-between items-center mb-3">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold shadow-md ${m.color.split(' ')[0]}`}>{m.name[0]}</div>
+                                                                <div>
+                                                                    <div className="font-bold text-slate-800">{m.name}</div>
+                                                                    <div className="text-[10px] text-slate-400">{m.skill}</div>
+                                                                </div>
+                                                            </div>
                                                         </div>
-                                                        <button onClick={() => openMapRoute(m.id)} className="w-full bg-white hover:bg-slate-50 text-slate-800 text-[11px] font-black py-3 rounded-2xl border border-slate-200 flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95">
+                                                        <button onClick={() => openMapRoute(m.id)} className="w-full bg-white hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 text-xs font-bold py-2.5 rounded-xl border border-slate-200 flex items-center justify-center gap-2 transition-all active:scale-95">
                                                             <Icons.Map /> 全日路線導航
                                                         </button>
                                                     </div>
-                                                    <div className="p-4 space-y-4 overflow-y-auto flex-1 bg-slate-50/30">
+                                                    <div className="p-3 space-y-3 overflow-y-auto flex-1 bg-slate-50/30">
                                                         {tasks.map(t => (
-                                                            <div key={t.id} className={`bg-white p-5 rounded-3xl border shadow-sm relative group card-anim border-l-4 ${t.isFixed ? 'border-red-500 ring-2 ring-red-100' : 'border-slate-100'}`} style={{borderLeftColor: t.isFixed ? '#ef4444' : m.color.split(' ')[0].replace('bg-', '') }}>
-                                                                <div className="flex justify-between text-[10px] text-slate-400 mb-3 border-b border-slate-50 pb-2">
+                                                            <div key={t.id} className={`bg-white p-4 rounded-2xl border shadow-sm relative group card-anim ${t.isFixed ? 'border-rose-200 ring-1 ring-rose-100' : 'border-slate-100'}`}>
+                                                                <div className="flex justify-between text-xs text-slate-400 mb-2 border-b border-slate-50 pb-2">
                                                                     <div className="flex items-center gap-2">
-                                                                        <span className="font-black text-blue-600 uppercase tracking-widest">{t.period || '全天'}</span>
-                                                                        {/* 鎖定按鈕 */}
-                                                                        <button onClick={() => toggleLock(t.id, t.isFixed)} className={`transition-colors ${t.isFixed ? 'text-red-500' : 'text-slate-300 hover:text-slate-500'}`} title={t.isFixed ? "急件鎖定中 (不會被重排)" : "點擊鎖定"}>
+                                                                        <span className="font-bold text-indigo-600">{t.period || '全天'}</span>
+                                                                        <button onClick={() => toggleLock(t.id, t.isFixed)} className={`transition-colors ${t.isFixed ? 'text-rose-500' : 'text-slate-300 hover:text-slate-500'}`} title={t.isFixed ? "急件鎖定中" : "點擊鎖定"}>
                                                                             {t.isFixed ? <Icons.Lock/> : <Icons.Unlock/>}
                                                                         </button>
                                                                     </div>
-                                                                    <button onClick={()=>removeAssign(t.id)} className="text-slate-300 hover:text-rose-500 transition-colors"><Icons.X/></button>
+                                                                    <button onClick={()=>removeAssign(t.id)} className="text-slate-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"><Icons.X/></button>
                                                                 </div>
-                                                                <div className="font-black text-slate-800 text-base mb-1">{t.project.name}</div>
-                                                                <div className="text-[11px] text-slate-500 mt-1 flex items-start gap-1">
-                                                                    <span className="mt-0.5">📍</span>
-                                                                    <span className="flex-1">{t.project.address || t.project.region}</span>
+                                                                <div className="font-bold text-slate-800 text-sm mb-1">{t.project.name}</div>
+                                                                <div className="text-xs text-slate-500 flex items-start gap-1">
+                                                                    <span className="mt-0.5 text-slate-300"><Icons.Map /></span> <span className="line-clamp-1">{t.project.address || t.project.region}</span>
                                                                 </div>
                                                             </div>
                                                         ))}
                                                         {tasks.length === 0 && (
-                                                            <div className="h-full flex flex-col items-center justify-center text-slate-300 opacity-50 space-y-2">
-                                                                <span className="text-3xl">☕</span>
-                                                                <span className="text-xs font-bold italic">目前無行程</span>
+                                                            <div className="h-full flex flex-col items-center justify-center text-slate-300 opacity-60 space-y-2">
+                                                                <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-xl">💤</div>
+                                                                <span className="text-xs font-bold">無行程</span>
                                                             </div>
                                                         )}
                                                     </div>
@@ -530,146 +543,122 @@
                         </div>
                     )}
 
-                    {/* 智慧排程視圖 */}
+                    {/* 智慧排程 */}
                     {view === 'smart' && (
-                        <div className="bg-slate-900 rounded-[3rem] shadow-2xl p-8 lg:p-12 text-white card-anim relative overflow-hidden">
-                            <div className="absolute -top-24 -right-24 w-96 h-96 bg-blue-600/20 rounded-full blur-3xl"></div>
-                            <div className="relative z-10">
-                                <div className="flex items-center gap-4 mb-8">
-                                    <div className="bg-blue-500 p-4 rounded-3xl text-white shadow-2xl shadow-blue-500/50 rotate-6">
-                                        <Icons.Robot />
-                                    </div>
+                        <div className="bg-slate-900 rounded-[2.5rem] shadow-2xl p-8 lg:p-12 text-white card-anim relative overflow-hidden">
+                            <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-600/20 rounded-full blur-[100px] -mr-20 -mt-20"></div>
+                            
+                            <div className="relative z-10 grid grid-cols-1 lg:grid-cols-2 gap-12">
+                                <div className="space-y-6">
                                     <div>
-                                        <h2 className="text-4xl font-black tracking-tighter">智慧排程中心</h2>
-                                        <p className="text-blue-300 text-sm font-medium">基於區域聚集演算法自動分配最優行程</p>
-                                    </div>
-                                </div>
-                                
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-                                    <div className="space-y-6">
-                                        <label className="font-black text-lg block text-slate-300">1. 輸入建案資料清單</label>
-                                        <div className="bg-slate-800/50 p-4 rounded-3xl border border-slate-700/50 text-xs text-slate-400 italic mb-4">
-                                            支援格式：<span className="text-blue-400 font-bold">建案名稱, 區域, 詳細地址, 師傅名字 (可選)</span>
+                                        <div className="flex items-center gap-3 mb-2 text-indigo-400">
+                                            <Icons.Robot /> <span className="text-sm font-bold uppercase tracking-widest">AI Scheduling</span>
                                         </div>
+                                        <h2 className="text-3xl font-bold tracking-tight">智慧排程中心</h2>
+                                        <p className="text-slate-400 text-sm mt-2">貼上建案資料，系統將自動分析區域與地址，並計算最佳分配。</p>
+                                    </div>
+                                    
+                                    <div className="bg-slate-800/50 p-6 rounded-3xl border border-slate-700/50 backdrop-blur-sm">
+                                        <label className="text-xs font-bold text-slate-400 mb-3 block uppercase">資料輸入區</label>
                                         <textarea 
-                                            className="w-full h-80 p-6 border border-slate-700 rounded-3xl bg-slate-800/50 text-white font-mono text-sm focus:ring-4 focus:ring-blue-500/20 outline-none transition-all"
-                                            placeholder="在此貼上多筆資料..."
+                                            className="w-full h-64 bg-slate-900/50 border border-slate-700 rounded-2xl p-4 text-sm text-slate-200 font-mono focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all placeholder-slate-600"
+                                            placeholder="範例格式：&#10;帝寶案, 大安區, 仁愛路三段53號, 陳師傅&#10;信義A13, 信義區, 松仁路58號"
                                             value={importText}
                                             onChange={e => setImportText(e.target.value)}
                                         ></textarea>
-                                        <button onClick={parseTasks} className="w-full bg-blue-600 text-white font-black py-5 rounded-[2rem] hover:bg-blue-500 transition-all shadow-xl shadow-blue-900/50 flex items-center justify-center gap-3 active:scale-95">分析並預覽資料</button>
+                                        <button onClick={parseTasks} className="w-full mt-4 bg-indigo-600 text-white font-bold py-4 rounded-xl hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-900/50">
+                                            1. 分析資料
+                                        </button>
                                     </div>
-                                    <div className="flex flex-col h-full">
-                                        <label className="font-black text-lg block text-slate-300 mb-6">2. 系統預覽與執行</label>
-                                        <div className="flex-1 border border-slate-700 rounded-[2.5rem] bg-slate-800/30 overflow-y-auto p-6 mb-6">
-                                            {parsedTasks.length === 0 ? (
-                                                <div className="h-full flex flex-col items-center justify-center text-slate-600 space-y-4 italic">
-                                                    <span className="text-5xl opacity-20">📊</span>
-                                                    <span>等待資料分析...</span>
-                                                </div>
-                                            ) : (
-                                                <div className="space-y-3">
-                                                    {parsedTasks.map((t, idx) => (
-                                                        <div key={idx} className="bg-slate-800 p-4 rounded-2xl flex justify-between items-center border border-slate-700 hover:border-blue-500/50 transition-all group shadow-sm">
-                                                            <div className="flex-1">
-                                                                <div className="font-black text-sm text-slate-200 group-hover:text-white">{t.name}</div>
-                                                                <div className="text-[10px] text-slate-500 mt-1 truncate max-w-[200px]">{t.address}</div>
-                                                            </div>
-                                                            <div className="flex flex-col items-end gap-1.5">
-                                                                <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black border ${getRegionStyles(t.region).replace('bg-', 'text-')}`}>{t.region}</span>
-                                                                {t.targetMaster ? (
-                                                                    <span className="bg-blue-600/20 text-blue-400 px-2 py-0.5 rounded-lg text-[9px] font-black border border-blue-500/30">指定：{t.targetMaster.name}</span>
-                                                                ) : (
-                                                                    <span className="text-[9px] font-bold text-slate-600 uppercase tracking-tighter">自動分配</span>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div className="bg-slate-800 p-8 rounded-[2.5rem] border border-slate-700 shadow-2xl">
-                                            <div className="mb-6">
-                                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2 block">排程起始日期</span>
-                                                <input type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} className="w-full bg-slate-900 border border-slate-700 p-4 rounded-2xl text-white font-bold" />
+                                </div>
+
+                                <div className="flex flex-col h-full bg-slate-800/30 rounded-[2rem] border border-slate-700/50 p-6">
+                                    <div className="flex-1 overflow-y-auto mb-6 pr-2">
+                                        {parsedTasks.length === 0 ? (
+                                            <div className="h-full flex flex-col items-center justify-center text-slate-600 space-y-3">
+                                                <div className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center text-2xl">📊</div>
+                                                <span className="text-sm font-medium">等待分析...</span>
                                             </div>
-                                            <label className="flex items-center gap-3 cursor-pointer bg-slate-900 p-4 rounded-2xl border border-slate-700 mb-6 hover:bg-slate-800 transition-all">
-                                                <input type="checkbox" checked={replanExisting} onChange={e=>setReplanExisting(e.target.checked)} className="w-5 h-5 text-blue-600 rounded-lg bg-slate-800 border-slate-600" />
-                                                <span className="text-sm font-bold text-slate-300">重排未來行程 <span className="text-red-400">(鎖定行程將被保留)</span></span>
-                                            </label>
-                                            <button 
-                                                onClick={executeSchedule}
-                                                disabled={parsedTasks.length === 0 || isProcessing}
-                                                className={`w-full py-5 rounded-[2rem] font-black text-white shadow-2xl transition-all flex items-center justify-center gap-3 ${isProcessing ? 'bg-slate-600' : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:scale-105 active:scale-95'}`}
-                                            >
-                                                {isProcessing ? "演算法計算中..." : "立刻啟動自動集中排程"}
-                                            </button>
+                                        ) : (
+                                            <div className="space-y-3">
+                                                {parsedTasks.map((t, idx) => (
+                                                    <div key={idx} className="bg-slate-800 p-4 rounded-2xl flex justify-between items-center border border-slate-700">
+                                                        <div>
+                                                            <div className="font-bold text-sm text-white">{t.name}</div>
+                                                            <div className="text-xs text-slate-500 mt-1">{t.address || t.region}</div>
+                                                        </div>
+                                                        <div className="flex flex-col items-end gap-1">
+                                                            <span className={`region-tag ${getRegionStyles(t.region).replace('bg-', 'text-').replace('border-', 'border-slate-600 ')}`}>{t.region}</span>
+                                                            {t.targetMaster ? (
+                                                                <span className="text-[10px] text-indigo-400 font-bold bg-indigo-900/30 px-2 py-0.5 rounded">指定：{t.targetMaster.name}</span>
+                                                            ) : (
+                                                                <span className="text-[10px] text-slate-500">自動</span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                    
+                                    <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700">
+                                        <div className="mb-4">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase block mb-2">排程起始日</label>
+                                            <input type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} className="w-full bg-slate-900 border border-slate-600 text-white p-3 rounded-xl font-bold outline-none focus:border-indigo-500"/>
                                         </div>
+                                        <label className="flex items-center gap-3 cursor-pointer p-2 mb-4 hover:bg-slate-700/50 rounded-lg transition-colors">
+                                            <input type="checkbox" checked={replanExisting} onChange={e=>setReplanExisting(e.target.checked)} className="w-5 h-5 rounded text-indigo-500 bg-slate-900 border-slate-600 focus:ring-0" />
+                                            <span className="text-sm text-slate-300">重排未來行程 <span className="text-xs text-rose-400 ml-1">(鎖定行程將被保留)</span></span>
+                                        </label>
+                                        <button 
+                                            onClick={executeSchedule}
+                                            disabled={parsedTasks.length === 0 || isProcessing}
+                                            className={`w-full py-4 rounded-xl font-bold text-white shadow-xl transition-all ${isProcessing ? 'bg-slate-700' : 'bg-gradient-to-r from-indigo-600 to-blue-600 hover:scale-[1.02]'}`}
+                                        >
+                                            {isProcessing ? "AI 計算中..." : "2. 執行智慧排程"}
+                                        </button>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* 建案在庫視圖 */}
+                    {/* 建案庫 */}
                     {view === 'projects' && (
-                        <div className="bg-white rounded-[2.5rem] shadow-2xl border border-slate-100 p-8 card-anim overflow-hidden">
-                            <div className="flex flex-col md:flex-row justify-between items-center mb-10 gap-6">
-                                <div>
-                                    <h2 className="text-3xl font-black text-slate-800 tracking-tight flex items-center gap-3">
-                                        <span className="text-blue-600">📂</span> 建案在庫管理
-                                    </h2>
-                                    <p className="text-slate-400 font-medium text-sm mt-1 uppercase tracking-widest">Active Project Database</p>
-                                </div>
-                                <button onClick={()=>setIsFormOpen(true)} className="bg-slate-900 text-white px-8 py-4 rounded-[2rem] font-black flex items-center gap-3 shadow-xl hover:bg-blue-600 transition-all active:scale-95">
-                                    <Icons.Plus /> 手動新增建案
+                        <div className="bg-white rounded-[2.5rem] shadow-xl border border-slate-100 p-8 card-anim">
+                            <div className="flex justify-between items-center mb-8">
+                                <h2 className="text-2xl font-bold text-slate-800">📂 建案資料庫</h2>
+                                <button onClick={()=>setIsFormOpen(true)} className="bg-slate-900 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:bg-slate-800 transition-all flex items-center gap-2">
+                                    <Icons.Plus /> 新增建案
                                 </button>
                             </div>
                             
                             {isFormOpen && (
-                                <div className="mb-10 p-8 bg-slate-50 rounded-[2.5rem] border border-slate-200 grid grid-cols-1 md:grid-cols-5 gap-4 shadow-inner card-anim">
-                                    <input placeholder="建案名稱" className="p-4 border rounded-2xl text-sm font-bold shadow-sm" value={newProject.name} onChange={e=>setNewProject({...newProject, name:e.target.value})} />
-                                    <input placeholder="區域" className="p-4 border rounded-2xl text-sm font-bold shadow-sm" value={newProject.region} onChange={e=>setNewProject({...newProject, region:e.target.value})} />
-                                    <input placeholder="地址" className="p-4 border rounded-2xl text-sm font-bold shadow-sm" value={newProject.address} onChange={e=>setNewProject({...newProject, address:e.target.value})} />
-                                    <input placeholder="備註內容" className="p-4 border rounded-2xl text-sm font-bold shadow-sm" value={newProject.note} onChange={e=>setNewProject({...newProject, note:e.target.value})} />
-                                    <div className="flex gap-3">
-                                        <button onClick={addProject} className="flex-1 bg-blue-600 text-white rounded-2xl font-black shadow-lg">儲存案子</button>
-                                        <button onClick={()=>setIsFormOpen(false)} className="px-6 bg-white border border-slate-200 rounded-2xl text-slate-500 font-bold hover:bg-slate-100">取消</button>
+                                <div className="mb-8 p-6 bg-slate-50 rounded-3xl border border-slate-200 grid grid-cols-1 md:grid-cols-5 gap-4 card-anim">
+                                    <input placeholder="建案名稱" className="p-3 bg-white border border-slate-200 rounded-xl text-sm font-bold" value={newProject.name} onChange={e=>setNewProject({...newProject, name:e.target.value})} />
+                                    <input placeholder="區域" className="p-3 bg-white border border-slate-200 rounded-xl text-sm font-bold" value={newProject.region} onChange={e=>setNewProject({...newProject, region:e.target.value})} />
+                                    <input placeholder="地址" className="p-3 bg-white border border-slate-200 rounded-xl text-sm font-bold" value={newProject.address} onChange={e=>setNewProject({...newProject, address:e.target.value})} />
+                                    <input placeholder="備註" className="p-3 bg-white border border-slate-200 rounded-xl text-sm font-bold" value={newProject.note} onChange={e=>setNewProject({...newProject, note:e.target.value})} />
+                                    <div className="flex gap-2">
+                                        <button onClick={addProject} className="flex-1 bg-indigo-600 text-white rounded-xl font-bold shadow-md hover:bg-indigo-500">儲存</button>
+                                        <button onClick={()=>setIsFormOpen(false)} className="px-4 bg-white border border-slate-300 rounded-xl text-slate-500 font-bold hover:bg-slate-100">取消</button>
                                     </div>
                                 </div>
                             )}
 
-                            <div className="overflow-x-auto rounded-[2rem] border border-slate-100">
+                            <div className="overflow-hidden rounded-2xl border border-slate-100">
                                 <table className="w-full text-left">
-                                    <thead>
-                                        <tr className="bg-slate-900 text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">
-                                            <th className="p-6">區域標籤</th>
-                                            <th className="p-6">建案名稱</th>
-                                            <th className="p-6">詳細地址</th>
-                                            <th className="p-6">備註事項</th>
-                                            <th className="p-6 text-center">操作</th>
-                                        </tr>
+                                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider font-bold">
+                                        <tr><th className="p-4">區域</th><th className="p-4">建案名</th><th className="p-4">地址</th><th className="p-4">備註</th><th className="p-4 text-center">刪除</th></tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
                                         {projects.map(p => (
-                                            <tr key={p.id} className="hover:bg-slate-50/80 transition-all group">
-                                                <td className="p-6 w-32">
-                                                    <EditableInput className={`region-tag border text-center font-black w-full bg-transparent ${getRegionStyles(p.region)}`} value={p.region} onSave={v=>updateProject(p.id, 'region', v)} />
-                                                </td>
-                                                <td className="p-6 font-black text-slate-800 text-base">
-                                                    <EditableInput className="w-full border-none bg-transparent font-black focus:bg-white focus:shadow-md focus:p-2 rounded-xl" value={p.name} onSave={v=>updateProject(p.id, 'name', v)} />
-                                                </td>
-                                                <td className="p-6 text-sm text-slate-500 leading-relaxed">
-                                                    <EditableInput className="w-full border-none bg-transparent focus:bg-white focus:shadow-md focus:p-2 rounded-xl" value={p.address} onSave={v=>updateProject(p.id, 'address', v)} />
-                                                </td>
-                                                <td className="p-6 text-sm text-slate-400 italic">
-                                                    <EditableInput className="w-full border-none bg-transparent focus:bg-white focus:shadow-md focus:p-2 rounded-xl" value={p.note} onSave={v=>updateProject(p.id, 'note', v)} />
-                                                </td>
-                                                <td className="p-6 text-center">
-                                                    <button onClick={()=>deleteProject(p.id)} className="text-slate-300 hover:text-rose-500 transition-all p-3 hover:bg-rose-50 rounded-2xl group-hover:scale-110">
-                                                        <Icons.Trash/>
-                                                    </button>
-                                                </td>
+                                            <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
+                                                <td className="p-4 w-32"><EditableInput className={`region-tag w-full text-center ${getRegionStyles(p.region)}`} value={p.region} onSave={v=>updateProject(p.id, 'region', v)} /></td>
+                                                <td className="p-4 font-bold text-slate-800"><EditableInput className="w-full border-none p-1 focus:bg-white rounded" value={p.name} onSave={v=>updateProject(p.id, 'name', v)} /></td>
+                                                <td className="p-4 text-sm text-slate-500"><EditableInput className="w-full border-none p-1 focus:bg-white rounded" value={p.address} onSave={v=>updateProject(p.id, 'address', v)} /></td>
+                                                <td className="p-4 text-sm text-slate-400"><EditableInput className="w-full border-none p-1 focus:bg-white rounded" value={p.note} onSave={v=>updateProject(p.id, 'note', v)} /></td>
+                                                <td className="p-4 text-center"><button onClick={()=>deleteProject(p.id)} className="text-slate-300 hover:text-rose-500 transition-colors p-2 hover:bg-rose-50 rounded-lg"><Icons.Trash/></button></td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -678,25 +667,26 @@
                         </div>
                     )}
 
-                    {/* 師傅設定視圖 */}
+                    {/* 師傅設定 */}
                     {view === 'settings' && (
-                        <div className="max-w-4xl mx-auto space-y-8 card-anim">
-                            <div className="text-center mb-12">
-                                <h2 className="text-4xl font-black text-slate-800 tracking-tighter">師傅管理與分享中心</h2>
-                                <p className="text-slate-400 mt-2 font-medium italic">點擊下方按鈕複製專屬行程網址傳送給師傅</p>
+                        <div className="max-w-4xl mx-auto">
+                            <div className="text-center mb-10">
+                                <h2 className="text-3xl font-bold text-slate-800">師傅管理與分享</h2>
+                                <p className="text-slate-400 mt-2">點擊下方卡片按鈕，複製專屬行程網址傳送給師傅</p>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 {masters.map(m => (
-                                    <div key={m.id} className="p-8 bg-white rounded-[2.5rem] shadow-xl border border-slate-100 flex flex-col items-center text-center relative overflow-hidden group">
-                                        <div className="absolute top-0 left-0 w-full h-2 shadow-inner opacity-80" style={{ backgroundColor: m.color.split(' ')[0].replace('bg-', '') }}></div>
-                                        <div className={`w-24 h-24 rounded-full flex items-center justify-center font-black text-3xl mb-4 shadow-2xl text-white shadow-slate-200 border-4 border-white ${m.color.split(' ')[0]}`}>{m.name[0]}</div>
-                                        <div className="mb-8 w-full">
-                                            <EditableInput className="font-black text-2xl text-slate-800 bg-transparent w-full border-none p-0 focus:ring-0 text-center mb-1" value={m.name} onSave={v=>updateMaster(m.id, 'name', v)} />
-                                            <EditableInput className="text-sm font-bold text-slate-400 bg-transparent w-full border-none p-0 focus:ring-0 text-center uppercase tracking-widest" value={m.skill} onSave={v=>updateMaster(m.id, 'skill', v)} />
+                                    <div key={m.id} className="bg-white p-6 rounded-[2rem] shadow-lg border border-slate-100 flex items-center gap-6 card-anim">
+                                        <div className={`w-20 h-20 rounded-full flex items-center justify-center text-3xl text-white font-bold shadow-lg ${m.color.split(' ')[0]}`}>
+                                            {m.name[0]}
                                         </div>
-                                        <button onClick={() => copyShareLink(m.name)} className="w-full bg-slate-900 text-white py-5 rounded-[2rem] font-black flex items-center justify-center gap-3 hover:bg-blue-600 transition-all shadow-xl shadow-slate-100 active:scale-95">
-                                            <Icons.Share /> 複製師傅專屬網址
-                                        </button>
+                                        <div className="flex-1">
+                                            <EditableInput className="text-2xl font-bold text-slate-800 w-full mb-1" value={m.name} onSave={v=>updateMaster(m.id, 'name', v)} />
+                                            <EditableInput className="text-sm font-bold text-slate-400 uppercase tracking-wider w-full mb-4" value={m.skill} onSave={v=>updateMaster(m.id, 'skill', v)} />
+                                            <button onClick={() => copyShareLink(m.name)} className="text-xs font-bold text-white bg-slate-900 px-4 py-2 rounded-full flex items-center gap-2 hover:bg-indigo-600 transition-colors shadow-md">
+                                                <Icons.Share /> 複製連結
+                                            </button>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -711,4 +701,3 @@
     </script>
 </body>
 </html>
-
