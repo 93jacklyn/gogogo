@@ -236,6 +236,7 @@
                     let bestMasterId = task.masterId;
                     let maxScore = -Infinity;
 
+                    // 關鍵修正：如果有指定師傅，只考慮該師傅
                     const potentialMasters = bestMasterId ? [masters.find(m => m.id === bestMasterId)] : masters;
                     
                     for (const m of potentialMasters) {
@@ -442,7 +443,7 @@
                                     <label className="font-bold text-slate-700 block text-sm">1. 貼上文字 (格式：建案名, 區域, 地址)</label>
                                     <textarea 
                                         className="w-full h-80 p-4 border border-slate-200 rounded-xl bg-slate-50 font-mono text-xs focus:ring-2 focus:ring-blue-500 outline-none"
-                                        placeholder="例如：&#10;帝寶案, 大安區, 仁愛路三段53號&#10;101櫃位, 信義區, 信義路五段7號"
+                                        placeholder="例如：&#10;帝寶案, 大安區, 仁愛路三段53號&#10;101櫃位, 信義區, 信義路五段7號, 陳師傅"
                                         value={importText}
                                         onChange={e => setImportText(e.target.value)}
                                     ></textarea>
@@ -458,6 +459,12 @@
                                                         <div className="font-bold truncate w-40">{t.name}</div>
                                                         <div className="flex gap-2">
                                                             <span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded border border-blue-100 font-bold">{t.region}</span>
+                                                            {/* 🟢 顯示指定師傅的標籤 */}
+                                                            {t.targetMaster ? (
+                                                                <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded border border-purple-200 font-bold">➡️ {t.targetMaster.name}</span>
+                                                            ) : (
+                                                                <span className="bg-gray-100 text-gray-400 px-2 py-0.5 rounded border border-gray-200">自動分配</span>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 ))}
